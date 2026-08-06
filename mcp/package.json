@@ -1,0 +1,22 @@
+{
+  "name": "trail-mcp",
+  "version": "0.1.0",
+  "description": "Trail MCP server — coding agents authenticate with a Trail API key and stream their runs into Trail as traces.",
+  "type": "module",
+  "bin": { "trail-mcp": "dist/index.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": { "node": ">=18" }
+}
