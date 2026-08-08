@@ -267,8 +267,9 @@ server.registerTool(
 		let verdict: Verdict | null = null;
 		if (judgeCfg && summary && run.name) {
 			try {
-				const evidence = `Steps: ${run.steps}, errors: ${run.errors}, status: ${status}`;
-				verdict = await judgeGoalAttainment(run.name, summary, evidence, judgeCfg);
+				const evidence = `Steps: ${run.steps}, errors: ${run.errors}`;
+				const outcomeWithStatus = `${summary}\nAgent-reported status: ${status}`;
+				verdict = await judgeGoalAttainment(run.name, outcomeWithStatus, evidence, judgeCfg);
 			} catch {
 				verdict = null; // fail open — a judge exception must never block the run from finishing
 			}
