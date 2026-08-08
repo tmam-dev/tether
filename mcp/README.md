@@ -94,4 +94,5 @@ Add an instruction to your agent's project rules (e.g. `CLAUDE.md` /
   both `TRAIL_JUDGE_PROVIDER`/`TRAIL_JUDGE_API_KEY` are set AND a `summary`
   was provided; it fails open (a judge problem never blocks or errors the
   run); it bills to whatever `TRAIL_JUDGE_API_KEY` is configured with, not
-  Trail's own budget.
+  Trail's own budget. The judge receives the goal, outcome summary, and the run's
+  automatically-recorded step and error counts as evidence.
