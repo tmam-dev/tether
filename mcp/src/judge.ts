@@ -57,6 +57,7 @@ async function judgeOpenAi(goal: string, outcome: string, cfg: JudgeConfig): Pro
 				{ role: "user", content: `Goal: ${goal}\nOutcome: ${outcome}` },
 			],
 		}),
+		signal: AbortSignal.timeout(15_000),
 	});
 
 	if (!res.ok) return null;

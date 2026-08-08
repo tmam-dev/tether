@@ -265,7 +265,7 @@ server.registerTool(
 	async ({ run_id, status, summary }) => {
 		const run = getRun(run_id);
 		let verdict: Verdict | null = null;
-		if (judgeCfg && summary) {
+		if (judgeCfg && summary && run.name) {
 			try {
 				verdict = await judgeGoalAttainment(run.name, summary, judgeCfg);
 			} catch {
