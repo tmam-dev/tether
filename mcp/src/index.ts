@@ -263,6 +263,7 @@ server.registerTool(
 				"gen_ai.operation.name": "agent",
 				"gen_ai.system": "trail-mcp",
 				"gen_ai.agent.name": run.agent,
+				"gen_ai.agent.goal": run.name,
 			},
 			events: summary
 				? [{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": summary } }]
