@@ -56,9 +56,10 @@ async function judgeOpenAi(goal: string, outcome: string, evidence: string, cfg:
 			response_format: { type: "json_object" },
 			messages: [
 				{ role: "system", content: SYSTEM_PROMPT },
+				{ role: "system", content: `<evidence>${evidence}</evidence>` },
 				{
 					role: "user",
-					content: `<goal>${goal}</goal>\n<outcome>${outcome}</outcome>\n<evidence>${evidence}</evidence>`,
+					content: `<goal>${goal}</goal>\n<outcome>${outcome}</outcome>`,
 				},
 			],
 		}),

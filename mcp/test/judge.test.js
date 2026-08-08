@@ -50,7 +50,7 @@ describe("judgeGoalAttainment", () => {
 		}
 	});
 
-	test("sends the goal, outcome, and evidence wrapped in their own delimiter tags", async () => {
+	test("sends goal and outcome (not evidence) in the user message, delimiter-tagged", async () => {
 		let sentBody;
 		const restore = stubFetch(async (_url, init) => {
 			sentBody = JSON.parse(init.body);
@@ -59,10 +59,23 @@ describe("judgeGoalAttainment", () => {
 		try {
 			await judgeGoalAttainment("Ship the feature", "Shipped it", "Steps: 4, errors: 0", CFG);
 			const userMessage = sentBody.messages.find((m) => m.role === "user").content;
-			assert.equal(
-				userMessage,
-				"<goal>Ship the feature</goal>\n<outcome>Shipped it</outcome>\n<evidence>Steps: 4, errors: 0</evidence>",
-			);
+			assert.equal(userMessage, "<goal>Ship the feature</goal>\n<outcome>Shipped it</outcome>");
+		} finally {
+			restore();
+		}
+	});
+
+	test("sends evidence in its own system message, separate from goal/outcome", async () => {
+		let sentBody;
+		const restore = stubFetch(async (_url, init) => {
+			sentBody = JSON.parse(init.body);
+			return okResponse(JSON.stringify({ verdict: "met", score: 1, narrative: "ok" }));
+		});
+		try {
+			await judgeGoalAttainment("Ship the feature", "Shipped it", "Steps: 4, errors: 0", CFG);
+			const systemMessages = sentBody.messages.filter((m) => m.role === "system");
+			assert.equal(systemMessages.length, 2);
+			assert.equal(systemMessages[1].content, "<evidence>Steps: 4, errors: 0</evidence>");
 		} finally {
 			restore();
 		}
