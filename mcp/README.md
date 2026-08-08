@@ -22,6 +22,13 @@ npm install
 npm run build
 ```
 
+## Test
+
+```bash
+npm run build
+npm test
+```
+
 ## Configure your coding agent
 
 Generate an API key pair in Trail (**Settings → API Keys**), then register the
