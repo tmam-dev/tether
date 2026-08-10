@@ -35,7 +35,11 @@ function parseVerdict(raw: string): Verdict | null {
 			typeof parsed.score === "number" &&
 			typeof parsed.narrative === "string"
 		) {
-			return { verdict: parsed.verdict, score: parsed.score, narrative: parsed.narrative };
+			// The system prompt asks for 0.0-1.0, but nothing stops a model from
+			// ignoring that — clamp so an out-of-range score can't reach the UI
+			// as e.g. a "Goal met (140%)" badge.
+			const score = Math.min(1, Math.max(0, parsed.score));
+			return { verdict: parsed.verdict, score, narrative: parsed.narrative };
 		}
 		return null;
 	} catch {

@@ -97,6 +97,30 @@ describe("judgeGoalAttainment", () => {
 		}
 	});
 
+	test("clamps an out-of-range score into 0-1", async () => {
+		const restore = stubFetch(async () =>
+			okResponse(JSON.stringify({ verdict: "met", score: 1.4, narrative: "great" })),
+		);
+		try {
+			const verdict = await judgeGoalAttainment("goal", "outcome", "evidence", CFG);
+			assert.deepEqual(verdict, { verdict: "met", score: 1, narrative: "great" });
+		} finally {
+			restore();
+		}
+	});
+
+	test("clamps a negative score to 0", async () => {
+		const restore = stubFetch(async () =>
+			okResponse(JSON.stringify({ verdict: "failed", score: -0.3, narrative: "bad" })),
+		);
+		try {
+			const verdict = await judgeGoalAttainment("goal", "outcome", "evidence", CFG);
+			assert.deepEqual(verdict, { verdict: "failed", score: 0, narrative: "bad" });
+		} finally {
+			restore();
+		}
+	});
+
 	test("fails open when the HTTP response is not ok", async () => {
 		const restore = stubFetch(async () => ({ ok: false, json: async () => ({}) }));
 		try {
