@@ -20,6 +20,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { TrailConfig, hexId, nowNanos, sendSpan } from "./otlp.js";
+import { judgeGoalAttainment, JudgeConfig, Verdict } from "./judge.js";
 
 // ---------------------------------------------------------------- config
 function requireEnv(name: string): string {
@@ -38,6 +39,16 @@ const cfg: TrailConfig = {
 	environment: process.env.TRAIL_ENV ?? "default",
 	serviceName: process.env.TRAIL_APP ?? "coding-agent",
 };
+
+const judgeCfg: JudgeConfig | undefined =
+	process.env.TRAIL_JUDGE_PROVIDER && process.env.TRAIL_JUDGE_API_KEY
+		? {
+				provider: process.env.TRAIL_JUDGE_PROVIDER,
+				apiKey: process.env.TRAIL_JUDGE_API_KEY,
+				model: process.env.TRAIL_JUDGE_MODEL,
+				baseUrl: process.env.TRAIL_JUDGE_BASE_URL,
+			}
+		: undefined;
 
 // ---------------------------------------------------------------- run state
 interface Run {
@@ -253,6 +264,14 @@ server.registerTool(
 	},
 	async ({ run_id, status, summary }) => {
 		const run = getRun(run_id);
+		let verdict: Verdict | null = null;
+		if (judgeCfg && summary && run.name) {
+			// judgeGoalAttainment already fails open (returns null, never
+			// throws past its own boundary) — see its doc comment.
+			const evidence = `Steps: ${run.steps}, errors: ${run.errors}`;
+			const outcomeWithStatus = `${summary}\nAgent-reported status: ${status}`;
+			verdict = await judgeGoalAttainment(run.name, outcomeWithStatus, evidence, judgeCfg);
+		}
 		await sendSpan(cfg, {
 			traceId: run.traceId,
 			spanId: run.rootSpanId,
@@ -263,6 +282,14 @@ server.registerTool(
 				"gen_ai.operation.name": "agent",
 				"gen_ai.system": "trail-mcp",
 				"gen_ai.agent.name": run.agent,
+				"gen_ai.agent.goal": run.name,
+				...(verdict
+					? {
+							"gen_ai.agent.verdict": verdict.verdict,
+							"gen_ai.agent.verdict_score": verdict.score,
+							"gen_ai.agent.verdict_narrative": verdict.narrative,
+						}
+					: {}),
 			},
 			events: summary
 				? [{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": summary } }]

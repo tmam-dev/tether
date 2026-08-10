@@ -22,6 +22,13 @@ npm install
 npm run build
 ```
 
+## Test
+
+```bash
+npm run build
+npm test
+```
+
 ## Configure your coding agent
 
 Generate an API key pair in Trail (**Settings → API Keys**), then register the
@@ -66,6 +73,10 @@ Environment variables:
 | `TRAIL_SECRET_KEY` | yes      | From Settings → API Keys                    |
 | `TRAIL_APP`        | no       | Service/agent name in the UI (`coding-agent`) |
 | `TRAIL_ENV`        | no       | Environment tag (`default`)                 |
+| `TRAIL_JUDGE_PROVIDER` | no   | LLM provider for the goal-attainment judge — only `openai` supported today |
+| `TRAIL_JUDGE_API_KEY`  | no   | API key for the judge provider              |
+| `TRAIL_JUDGE_MODEL`    | no   | Judge model id, default `gpt-4o-mini`       |
+| `TRAIL_JUDGE_BASE_URL` | no   | OpenAI-compatible base URL, default `https://api.openai.com/v1` — also works with Azure OpenAI, OpenRouter, LiteLLM proxies, local vLLM/Ollama, etc. |
 
 ## Make the agent actually use it
 
@@ -86,3 +97,11 @@ Add an instruction to your agent's project rules (e.g. `CLAUDE.md` /
   instead of silently dropping traces.
 - Run state is in-memory per MCP session; one session can hold multiple
   concurrent runs (each `trail_start_run` returns its own `run_id`).
+- Judging runs synchronously when `trail_finish_run` is called, only when
+  both `TRAIL_JUDGE_PROVIDER`/`TRAIL_JUDGE_API_KEY` are set AND a `summary`
+  was provided; it fails open (a judge problem never blocks or errors the
+  run); it bills to whatever `TRAIL_JUDGE_API_KEY` is configured with, not
+  Trail's own budget. The judge receives the goal, outcome summary, and the
+  agent-declared status as untrusted, self-reported claims, weighed against
+  the run's automatically-recorded step and error counts — sent as a
+  separate, trusted message the judge is told to trust over the claims.
