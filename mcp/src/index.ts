@@ -266,13 +266,11 @@ server.registerTool(
 		const run = getRun(run_id);
 		let verdict: Verdict | null = null;
 		if (judgeCfg && summary && run.name) {
-			try {
-				const evidence = `Steps: ${run.steps}, errors: ${run.errors}`;
-				const outcomeWithStatus = `${summary}\nAgent-reported status: ${status}`;
-				verdict = await judgeGoalAttainment(run.name, outcomeWithStatus, evidence, judgeCfg);
-			} catch {
-				verdict = null; // fail open — a judge exception must never block the run from finishing
-			}
+			// judgeGoalAttainment already fails open (returns null, never
+			// throws past its own boundary) — see its doc comment.
+			const evidence = `Steps: ${run.steps}, errors: ${run.errors}`;
+			const outcomeWithStatus = `${summary}\nAgent-reported status: ${status}`;
+			verdict = await judgeGoalAttainment(run.name, outcomeWithStatus, evidence, judgeCfg);
 		}
 		await sendSpan(cfg, {
 			traceId: run.traceId,
