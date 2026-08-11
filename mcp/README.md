@@ -38,7 +38,7 @@ server with your client.
 
 ```bash
 claude mcp add trail \
-  -e TRAIL_URL=https://trail.buildai.sa/api/sdk/v1 \
+  -e TRAIL_URL=https://api.trailai.dev/api/sdk/v1 \
   -e TRAIL_PUBLIC_KEY=pk-... \
   -e TRAIL_SECRET_KEY=sk-... \
   -e TRAIL_APP=claude-code \
@@ -54,7 +54,7 @@ claude mcp add trail \
       "command": "node",
       "args": ["/absolute/path/to/mcp/dist/index.js"],
       "env": {
-        "TRAIL_URL": "https://trail.buildai.sa/api/sdk/v1",
+        "TRAIL_URL": "https://api.trailai.dev/api/sdk/v1",
         "TRAIL_PUBLIC_KEY": "pk-...",
         "TRAIL_SECRET_KEY": "sk-...",
         "TRAIL_APP": "cursor"
