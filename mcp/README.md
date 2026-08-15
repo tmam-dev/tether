@@ -107,6 +107,9 @@ Add an instruction to your agent's project rules (e.g. `CLAUDE.md` /
   instead of silently dropping traces.
 - Run state is in-memory per MCP session; one session can hold multiple
   concurrent runs (each `trail_start_run` returns its own `run_id`).
+- `status` on `trail_log_step`, `trail_log_llm_call`, and `trail_finish_run`
+  takes `"ok"` or `"error"`; common synonyms (`success`, `failed`, `failure`,
+  `pass`, `passed`, case-insensitive) are accepted too.
 - Judging runs synchronously when `trail_finish_run` is called, only when
   both `TRAIL_JUDGE_PROVIDER`/`TRAIL_JUDGE_API_KEY` are set AND a `summary`
   was provided; it fails open (a judge problem never blocks or errors the

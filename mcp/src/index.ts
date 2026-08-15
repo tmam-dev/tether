@@ -71,8 +71,30 @@ function getRun(runId: string): Run {
 
 const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
 
+// Accept common synonyms ("success"/"failed"/…) so a model that guesses at
+// the value instead of reading the enum still lands on "ok" | "error".
+const STATUS_ALIASES: Record<string, "ok" | "error"> = {
+	ok: "ok",
+	success: "ok",
+	succeeded: "ok",
+	pass: "ok",
+	passed: "ok",
+	error: "error",
+	fail: "error",
+	failed: "error",
+	failure: "error",
+};
+
+const statusSchema = z
+	.preprocess(
+		(v) => (typeof v === "string" ? (STATUS_ALIASES[v.toLowerCase()] ?? v) : v),
+		z.enum(["ok", "error"]),
+	)
+	.default("ok")
+	.describe("Outcome: 'ok' or 'error' ('success'/'failed'/'failure'/'pass' etc. are also accepted)");
+
 // ---------------------------------------------------------------- server
-const server = new McpServer({ name: "trail", version: "0.1.0" });
+const server = new McpServer({ name: "trail", version: "0.1.1" });
 
 server.registerTool(
 	"trail_start_run",
@@ -114,7 +136,7 @@ server.registerTool(
 			kind: z.enum(["task", "tool"]).describe("task = reasoning/work unit, tool = external action"),
 			input: z.string().optional().describe("What went in (command, arguments, file path…)"),
 			output: z.string().optional().describe("What came out (truncated result, diff summary…)"),
-			status: z.enum(["ok", "error"]).default("ok"),
+			status: statusSchema,
 			error_message: z.string().optional(),
 			duration_ms: z.number().optional().describe("How long the step took (defaults to instant)"),
 		},
@@ -168,7 +190,7 @@ server.registerTool(
 			output_tokens: z.number().optional(),
 			cost_usd: z.number().optional(),
 			duration_ms: z.number().optional(),
-			status: z.enum(["ok", "error"]).default("ok"),
+			status: statusSchema,
 			error_message: z.string().optional(),
 		},
 	},
@@ -258,7 +280,7 @@ server.registerTool(
 			"Close the run and emit the root agent span with total duration. Call once when the task is done.",
 		inputSchema: {
 			run_id: z.string(),
-			status: z.enum(["ok", "error"]).default("ok"),
+			status: statusSchema,
 			summary: z.string().optional().describe("One-line outcome, shown as the run's output"),
 		},
 	},
