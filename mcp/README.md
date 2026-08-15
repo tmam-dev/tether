@@ -16,6 +16,13 @@ the existing UI with **zero UI changes**:
 
 ## Install
 
+Published as [`trailai-mcp`](https://www.npmjs.com/package/trailai-mcp) on
+npm — no clone required. `npx` fetches and runs it on demand, so the config
+below is the entire install.
+
+Building from source (contributing to this repo, or running an unpublished
+change) still works the old way:
+
 ```bash
 cd mcp
 npm install
@@ -42,7 +49,7 @@ claude mcp add trail \
   -e TRAIL_PUBLIC_KEY=pk-... \
   -e TRAIL_SECRET_KEY=sk-... \
   -e TRAIL_APP=claude-code \
-  -- node /absolute/path/to/mcp/dist/index.js
+  -- npx -y trailai-mcp
 ```
 
 **Cursor / Windsurf** (`.cursor/mcp.json` or the equivalent):
@@ -51,8 +58,8 @@ claude mcp add trail \
 {
   "mcpServers": {
     "trail": {
-      "command": "node",
-      "args": ["/absolute/path/to/mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "trailai-mcp"],
       "env": {
         "TRAIL_URL": "https://api.trailai.dev/api/sdk/v1",
         "TRAIL_PUBLIC_KEY": "pk-...",
@@ -63,6 +70,9 @@ claude mcp add trail \
   }
 }
 ```
+
+Running from a local build instead (`npm run build` above), swap the
+`command`/`args` for `node` and the absolute path to `mcp/dist/index.js`.
 
 Environment variables:
 
