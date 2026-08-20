@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { discoverSkills, buildHarnessManifest } from "../dist/manifest.js";
+import { discoverSkills, discoverUserSkills, buildHarnessManifest } from "../dist/manifest.js";
 
-function makeProjectRoot() {
-	return mkdtempSync(join(tmpdir(), "trail-manifest-test-"));
+function makeTempDir(prefix) {
+	return mkdtempSync(join(tmpdir(), prefix));
 }
 
 function writeSkill(rootDir, skillName, frontmatter) {
@@ -17,7 +17,7 @@ function writeSkill(rootDir, skillName, frontmatter) {
 
 describe("discoverSkills", () => {
 	test("returns an empty array when .claude/skills does not exist", () => {
-		const rootDir = makeProjectRoot();
+		const rootDir = makeTempDir("trail-manifest-test-");
 		try {
 			assert.deepEqual(discoverSkills(rootDir), []);
 		} finally {
@@ -25,8 +25,8 @@ describe("discoverSkills", () => {
 		}
 	});
 
-	test("parses name and description from a skill's frontmatter", () => {
-		const rootDir = makeProjectRoot();
+	test("parses name and description from a skill's frontmatter, tagged with source project", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
 		try {
 			writeSkill(
 				rootDir,
@@ -34,7 +34,7 @@ describe("discoverSkills", () => {
 				"---\nname: run-platform-locally\ndescription: Use when asked to run the platform locally.\n---\n\n# Body\n",
 			);
 			assert.deepEqual(discoverSkills(rootDir), [
-				{ name: "run-platform-locally", description: "Use when asked to run the platform locally." },
+				{ name: "run-platform-locally", description: "Use when asked to run the platform locally.", source: "project" },
 			]);
 		} finally {
 			rmSync(rootDir, { recursive: true, force: true });
@@ -42,7 +42,7 @@ describe("discoverSkills", () => {
 	});
 
 	test("discovers multiple skills, sorted by directory read order", () => {
-		const rootDir = makeProjectRoot();
+		const rootDir = makeTempDir("trail-manifest-test-");
 		try {
 			writeSkill(rootDir, "skill-a", "---\nname: skill-a\ndescription: First skill.\n---\n");
 			writeSkill(rootDir, "skill-b", "---\nname: skill-b\ndescription: Second skill.\n---\n");
@@ -52,13 +52,14 @@ describe("discoverSkills", () => {
 				skills.map((s) => s.name).sort(),
 				["skill-a", "skill-b"],
 			);
+			assert.ok(skills.every((s) => s.source === "project"));
 		} finally {
 			rmSync(rootDir, { recursive: true, force: true });
 		}
 	});
 
 	test("skips a skill directory with no SKILL.md", () => {
-		const rootDir = makeProjectRoot();
+		const rootDir = makeTempDir("trail-manifest-test-");
 		try {
 			mkdirSync(join(rootDir, ".claude", "skills", "empty-dir"), { recursive: true });
 			assert.deepEqual(discoverSkills(rootDir), []);
@@ -68,7 +69,7 @@ describe("discoverSkills", () => {
 	});
 
 	test("skips a SKILL.md with no frontmatter delimiters", () => {
-		const rootDir = makeProjectRoot();
+		const rootDir = makeTempDir("trail-manifest-test-");
 		try {
 			writeSkill(rootDir, "broken", "# Just a heading, no frontmatter\n");
 			assert.deepEqual(discoverSkills(rootDir), []);
@@ -78,7 +79,7 @@ describe("discoverSkills", () => {
 	});
 
 	test("skips frontmatter missing name or description", () => {
-		const rootDir = makeProjectRoot();
+		const rootDir = makeTempDir("trail-manifest-test-");
 		try {
 			writeSkill(rootDir, "no-description", "---\nname: no-description\n---\n");
 			assert.deepEqual(discoverSkills(rootDir), []);
@@ -88,7 +89,7 @@ describe("discoverSkills", () => {
 	});
 
 	test("truncates a description longer than 300 characters to exactly 300", () => {
-		const rootDir = makeProjectRoot();
+		const rootDir = makeTempDir("trail-manifest-test-");
 		try {
 			const longDescription = "x".repeat(400);
 			writeSkill(
@@ -106,7 +107,7 @@ describe("discoverSkills", () => {
 	});
 
 	test("leaves a description of exactly 300 characters or shorter unchanged", () => {
-		const rootDir = makeProjectRoot();
+		const rootDir = makeTempDir("trail-manifest-test-");
 		try {
 			const exactDescription = "y".repeat(300);
 			writeSkill(
@@ -129,46 +130,97 @@ describe("discoverSkills", () => {
 		}
 	});
 
-	test("caps discovered skills at 200 when more than 200 valid skill directories exist", () => {
-		const rootDir = makeProjectRoot();
+	test("caps discovered skills at 50 when more than 50 valid skill directories exist", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
 		try {
-			for (let i = 0; i < 250; i++) {
+			for (let i = 0; i < 70; i++) {
 				const name = `skill-${String(i).padStart(3, "0")}`;
 				writeSkill(rootDir, name, `---\nname: ${name}\ndescription: Skill number ${i}.\n---\n`);
 			}
 			const skills = discoverSkills(rootDir);
-			assert.equal(skills.length, 200);
+			assert.equal(skills.length, 50);
 		} finally {
 			rmSync(rootDir, { recursive: true, force: true });
 		}
 	});
 
-	test("returns all skills when 200 or fewer valid skill directories exist", () => {
-		const rootDir = makeProjectRoot();
+	test("returns all skills when 50 or fewer valid skill directories exist", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
 		try {
-			for (let i = 0; i < 150; i++) {
+			for (let i = 0; i < 30; i++) {
 				const name = `skill-${String(i).padStart(3, "0")}`;
 				writeSkill(rootDir, name, `---\nname: ${name}\ndescription: Skill number ${i}.\n---\n`);
 			}
 			const skills = discoverSkills(rootDir);
-			assert.equal(skills.length, 150);
+			assert.equal(skills.length, 30);
 		} finally {
 			rmSync(rootDir, { recursive: true, force: true });
 		}
 	});
 });
 
-describe("buildHarnessManifest", () => {
-	test("wraps discovered skills with a schema version", () => {
-		const rootDir = makeProjectRoot();
+describe("discoverUserSkills", () => {
+	test("returns an empty array when the home directory has no .claude/skills", () => {
+		const homeDir = makeTempDir("trail-manifest-home-test-");
 		try {
-			writeSkill(rootDir, "skill-a", "---\nname: skill-a\ndescription: First skill.\n---\n");
-			assert.deepEqual(buildHarnessManifest(rootDir), {
-				schemaVersion: 1,
-				skills: [{ name: "skill-a", description: "First skill." }],
-			});
+			assert.deepEqual(discoverUserSkills(homeDir), []);
+		} finally {
+			rmSync(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	test("parses a user-level skill, tagged with source user", () => {
+		const homeDir = makeTempDir("trail-manifest-home-test-");
+		try {
+			writeSkill(homeDir, "my-user-skill", "---\nname: my-user-skill\ndescription: A user-level skill.\n---\n");
+			assert.deepEqual(discoverUserSkills(homeDir), [
+				{ name: "my-user-skill", description: "A user-level skill.", source: "user" },
+			]);
+		} finally {
+			rmSync(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	test("skips a flat .md file directly under .claude/skills (not the <name>/SKILL.md convention)", () => {
+		const homeDir = makeTempDir("trail-manifest-home-test-");
+		try {
+			mkdirSync(join(homeDir, ".claude", "skills"), { recursive: true });
+			writeFileSync(join(homeDir, ".claude", "skills", "commit.md"), "# Commit Skill\n\nSome instructions.\n");
+			assert.deepEqual(discoverUserSkills(homeDir), []);
+		} finally {
+			rmSync(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	test("caps discovered user skills at 50", () => {
+		const homeDir = makeTempDir("trail-manifest-home-test-");
+		try {
+			for (let i = 0; i < 70; i++) {
+				const name = `user-skill-${String(i).padStart(3, "0")}`;
+				writeSkill(homeDir, name, `---\nname: ${name}\ndescription: User skill number ${i}.\n---\n`);
+			}
+			assert.equal(discoverUserSkills(homeDir).length, 50);
+		} finally {
+			rmSync(homeDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("buildHarnessManifest", () => {
+	test("combines project and user skills into one skills array", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		const homeDir = makeTempDir("trail-manifest-home-test-");
+		try {
+			writeSkill(rootDir, "project-skill", "---\nname: project-skill\ndescription: Project skill.\n---\n");
+			writeSkill(homeDir, "user-skill", "---\nname: user-skill\ndescription: User skill.\n---\n");
+			const manifest = buildHarnessManifest(rootDir, homeDir);
+			assert.equal(manifest.schemaVersion, 1);
+			const byName = Object.fromEntries(manifest.skills.map((s) => [s.name, s]));
+			assert.deepEqual(byName["project-skill"], { name: "project-skill", description: "Project skill.", source: "project" });
+			assert.deepEqual(byName["user-skill"], { name: "user-skill", description: "User skill.", source: "user" });
 		} finally {
 			rmSync(rootDir, { recursive: true, force: true });
+			rmSync(homeDir, { recursive: true, force: true });
 		}
 	});
 });

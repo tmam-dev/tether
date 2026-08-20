@@ -6,10 +6,12 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 
 export interface SkillEntry {
 	name: string;
 	description: string;
+	source: "project" | "user";
 }
 
 export interface HarnessManifest {
@@ -19,7 +21,13 @@ export interface HarnessManifest {
 
 const FRONTMATTER_DELIMITER = "---";
 const MAX_DESCRIPTION_LENGTH = 300;
-const MAX_SKILLS = 200;
+// 50, not 200: this manifest now has four categories (project skills, user
+// skills, sub-agents, MCP servers) sharing one ~100KB request-body budget.
+// Worst case: 3 categories x 50 entries x ~370 bytes (name + 300-char
+// description + JSON overhead) + 50 MCP-server entries x ~50 bytes
+// (name only) ~= 58KB -- safely under budget with headroom for the run's
+// other span attributes.
+const MAX_SKILLS = 50;
 
 function parseFrontmatter(content: string): Record<string, string> | null {
 	const lines = content.split("\n");
@@ -38,19 +46,7 @@ function parseFrontmatter(content: string): Record<string, string> | null {
 	return fields;
 }
 
-/**
- * Reads rootDir/.claude/skills/[name]/SKILL.md frontmatter. A missing
- * .claude/skills directory, a skill directory with no SKILL.md, or a
- * SKILL.md missing frontmatter/name/description is skipped, never thrown -
- * manifest discovery must never break trail_start_run.
- *
- * Output is bounded so the resulting manifest can never grow large enough to
- * blow past the server's request body limit: each description is truncated
- * to MAX_DESCRIPTION_LENGTH characters, and at most MAX_SKILLS entries are
- * returned (the first ones encountered, no prioritization).
- */
-export function discoverSkills(rootDir: string): SkillEntry[] {
-	const skillsDir = join(rootDir, ".claude", "skills");
+function scanSkillsDir(skillsDir: string, source: "project" | "user"): SkillEntry[] {
 	let entries: string[];
 	try {
 		entries = readdirSync(skillsDir);
@@ -76,11 +72,40 @@ export function discoverSkills(rootDir: string): SkillEntry[] {
 		skills.push({
 			name: frontmatter.name,
 			description: frontmatter.description.slice(0, MAX_DESCRIPTION_LENGTH),
+			source,
 		});
 	}
 	return skills;
 }
 
-export function buildHarnessManifest(rootDir: string): HarnessManifest {
-	return { schemaVersion: 1, skills: discoverSkills(rootDir) };
+/**
+ * Reads rootDir/.claude/skills/[name]/SKILL.md frontmatter. A missing
+ * .claude/skills directory, a skill directory with no SKILL.md, or a
+ * SKILL.md missing frontmatter/name/description is skipped, never thrown -
+ * manifest discovery must never break trail_start_run.
+ *
+ * Output is bounded so the resulting manifest can never grow large enough to
+ * blow past the server's request body limit: each description is truncated
+ * to MAX_DESCRIPTION_LENGTH characters, and at most MAX_SKILLS entries are
+ * returned (the first ones encountered, no prioritization).
+ */
+export function discoverSkills(rootDir: string): SkillEntry[] {
+	return scanSkillsDir(join(rootDir, ".claude", "skills"), "project");
+}
+
+/**
+ * Same discovery and bounding as discoverSkills, but reads the developer's
+ * user-level ~/.claude/skills/ instead of a project directory. Takes an
+ * optional homeDir override (defaults to the real home directory) so this
+ * is testable without touching the real developer's home directory.
+ */
+export function discoverUserSkills(homeDir: string = homedir()): SkillEntry[] {
+	return scanSkillsDir(join(homeDir, ".claude", "skills"), "user");
+}
+
+export function buildHarnessManifest(rootDir: string, homeDir: string = homedir()): HarnessManifest {
+	return {
+		schemaVersion: 1,
+		skills: [...discoverSkills(rootDir), ...discoverUserSkills(homeDir)],
+	};
 }
