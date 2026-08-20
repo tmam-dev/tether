@@ -83,6 +83,7 @@ Environment variables:
 | `TRAIL_SECRET_KEY` | yes      | From Settings → API Keys                    |
 | `TRAIL_APP`        | no       | Service/agent name in the UI (`coding-agent`) |
 | `TRAIL_ENV`        | no       | Environment tag (`default`)                 |
+| `TRAIL_PROJECT_ROOT` | no   | Project root to discover `.claude/skills/` from (default: process cwd) |
 | `TRAIL_JUDGE_PROVIDER` | no   | LLM provider for the goal-attainment judge — only `openai` supported today |
 | `TRAIL_JUDGE_API_KEY`  | no   | API key for the judge provider              |
 | `TRAIL_JUDGE_MODEL`    | no   | Judge model id, default `gpt-4o-mini`       |
@@ -118,3 +119,10 @@ Add an instruction to your agent's project rules (e.g. `CLAUDE.md` /
   agent-declared status as untrusted, self-reported claims, weighed against
   the run's automatically-recorded step and error counts — sent as a
   separate, trusted message the judge is told to trust over the claims.
+- `trail_start_run` reads `.claude/skills/*/SKILL.md` frontmatter (`name`,
+  `description`) from `TRAIL_PROJECT_ROOT` (default: process cwd) and
+  attaches it as a `gen_ai.agent.harness_manifest` JSON attribute on the
+  root span `trail_finish_run` emits — a snapshot of what skills the
+  harness had available at that run's start. A missing `.claude/skills`
+  directory or an unparseable `SKILL.md` is skipped silently; this never
+  blocks or errors the run.

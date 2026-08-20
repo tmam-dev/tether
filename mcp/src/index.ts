@@ -20,6 +20,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { TrailConfig, hexId, nowNanos, sendSpan } from "./otlp.js";
+import { buildHarnessManifest, HarnessManifest } from "./manifest.js";
 import { judgeGoalAttainment, JudgeConfig, Verdict } from "./judge.js";
 
 // ---------------------------------------------------------------- config
@@ -59,6 +60,7 @@ interface Run {
 	startNanos: string;
 	steps: number;
 	errors: number;
+	manifest: HarnessManifest;
 }
 
 const runs = new Map<string, Run>();
@@ -110,6 +112,7 @@ server.registerTool(
 	},
 	async ({ name, agent }) => {
 		const runId = hexId(8);
+		const rootDir = process.env.TRAIL_PROJECT_ROOT ?? process.cwd();
 		runs.set(runId, {
 			traceId: hexId(16),
 			rootSpanId: hexId(8),
@@ -118,6 +121,7 @@ server.registerTool(
 			startNanos: nowNanos(),
 			steps: 0,
 			errors: 0,
+			manifest: buildHarnessManifest(rootDir),
 		});
 		return ok(`run started: run_id=${runId}. Log steps with trail_log_step / trail_log_llm_call, finish with trail_finish_run.`);
 	},
@@ -305,6 +309,7 @@ server.registerTool(
 				"gen_ai.system": "trail-mcp",
 				"gen_ai.agent.name": run.agent,
 				"gen_ai.agent.goal": run.name,
+				"gen_ai.agent.harness_manifest": JSON.stringify(run.manifest),
 				...(verdict
 					? {
 							"gen_ai.agent.verdict": verdict.verdict,
