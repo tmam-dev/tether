@@ -86,6 +86,76 @@ describe("discoverSkills", () => {
 			rmSync(rootDir, { recursive: true, force: true });
 		}
 	});
+
+	test("truncates a description longer than 300 characters to exactly 300", () => {
+		const rootDir = makeProjectRoot();
+		try {
+			const longDescription = "x".repeat(400);
+			writeSkill(
+				rootDir,
+				"long-description",
+				`---\nname: long-description\ndescription: ${longDescription}\n---\n`,
+			);
+			const skills = discoverSkills(rootDir);
+			assert.equal(skills.length, 1);
+			assert.equal(skills[0].description.length, 300);
+			assert.equal(skills[0].description, "x".repeat(300));
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("leaves a description of exactly 300 characters or shorter unchanged", () => {
+		const rootDir = makeProjectRoot();
+		try {
+			const exactDescription = "y".repeat(300);
+			writeSkill(
+				rootDir,
+				"exact-description",
+				`---\nname: exact-description\ndescription: ${exactDescription}\n---\n`,
+			);
+			const shortDescription = "Short description.";
+			writeSkill(
+				rootDir,
+				"short-description",
+				`---\nname: short-description\ndescription: ${shortDescription}\n---\n`,
+			);
+			const skills = discoverSkills(rootDir);
+			const byName = Object.fromEntries(skills.map((s) => [s.name, s.description]));
+			assert.equal(byName["exact-description"], exactDescription);
+			assert.equal(byName["short-description"], shortDescription);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("caps discovered skills at 200 when more than 200 valid skill directories exist", () => {
+		const rootDir = makeProjectRoot();
+		try {
+			for (let i = 0; i < 250; i++) {
+				const name = `skill-${String(i).padStart(3, "0")}`;
+				writeSkill(rootDir, name, `---\nname: ${name}\ndescription: Skill number ${i}.\n---\n`);
+			}
+			const skills = discoverSkills(rootDir);
+			assert.equal(skills.length, 200);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("returns all skills when 200 or fewer valid skill directories exist", () => {
+		const rootDir = makeProjectRoot();
+		try {
+			for (let i = 0; i < 150; i++) {
+				const name = `skill-${String(i).padStart(3, "0")}`;
+				writeSkill(rootDir, name, `---\nname: ${name}\ndescription: Skill number ${i}.\n---\n`);
+			}
+			const skills = discoverSkills(rootDir);
+			assert.equal(skills.length, 150);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("buildHarnessManifest", () => {

@@ -123,6 +123,10 @@ Add an instruction to your agent's project rules (e.g. `CLAUDE.md` /
   `description`) from `TRAIL_PROJECT_ROOT` (default: process cwd) and
   attaches it as a `gen_ai.agent.harness_manifest` JSON attribute on the
   root span `trail_finish_run` emits — a snapshot of what skills the
-  harness had available at that run's start. A missing `.claude/skills`
-  directory or an unparseable `SKILL.md` is skipped silently; this never
-  blocks or errors the run.
+  harness had available at that run's start, scoped to the project's own
+  `.claude/skills/` directory only (not user-level `~/.claude/skills/` or
+  plugin-provided skills). A missing `.claude/skills` directory or an
+  unparseable `SKILL.md` is skipped silently; this never blocks or errors
+  the run. Descriptions are truncated to 300 characters and the manifest
+  caps out at 200 skills, to keep this attribute well within the server's
+  request size limit.

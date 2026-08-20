@@ -18,6 +18,8 @@ export interface HarnessManifest {
 }
 
 const FRONTMATTER_DELIMITER = "---";
+const MAX_DESCRIPTION_LENGTH = 300;
+const MAX_SKILLS = 200;
 
 function parseFrontmatter(content: string): Record<string, string> | null {
 	const lines = content.split("\n");
@@ -41,6 +43,11 @@ function parseFrontmatter(content: string): Record<string, string> | null {
  * .claude/skills directory, a skill directory with no SKILL.md, or a
  * SKILL.md missing frontmatter/name/description is skipped, never thrown -
  * manifest discovery must never break trail_start_run.
+ *
+ * Output is bounded so the resulting manifest can never grow large enough to
+ * blow past the server's request body limit: each description is truncated
+ * to MAX_DESCRIPTION_LENGTH characters, and at most MAX_SKILLS entries are
+ * returned (the first ones encountered, no prioritization).
  */
 export function discoverSkills(rootDir: string): SkillEntry[] {
 	const skillsDir = join(rootDir, ".claude", "skills");
@@ -53,6 +60,8 @@ export function discoverSkills(rootDir: string): SkillEntry[] {
 
 	const skills: SkillEntry[] = [];
 	for (const entry of entries) {
+		if (skills.length >= MAX_SKILLS) break;
+
 		const skillPath = join(skillsDir, entry, "SKILL.md");
 		let content: string;
 		try {
@@ -64,7 +73,10 @@ export function discoverSkills(rootDir: string): SkillEntry[] {
 
 		const frontmatter = parseFrontmatter(content);
 		if (!frontmatter?.name || !frontmatter?.description) continue;
-		skills.push({ name: frontmatter.name, description: frontmatter.description });
+		skills.push({
+			name: frontmatter.name,
+			description: frontmatter.description.slice(0, MAX_DESCRIPTION_LENGTH),
+		});
 	}
 	return skills;
 }
