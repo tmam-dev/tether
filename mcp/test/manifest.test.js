@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { discoverSkills, discoverUserSkills, buildHarnessManifest } from "../dist/manifest.js";
+import { discoverSkills, discoverUserSkills, discoverSubAgents, buildHarnessManifest } from "../dist/manifest.js";
 
 function makeTempDir(prefix) {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -13,6 +13,12 @@ function writeSkill(rootDir, skillName, frontmatter) {
 	const dir = join(rootDir, ".claude", "skills", skillName);
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, "SKILL.md"), frontmatter);
+}
+
+function writeAgent(rootDir, agentName, frontmatter) {
+	const dir = join(rootDir, ".claude", "agents");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, `${agentName}.md`), frontmatter);
 }
 
 describe("discoverSkills", () => {
@@ -202,6 +208,92 @@ describe("discoverUserSkills", () => {
 			assert.equal(discoverUserSkills(homeDir).length, 50);
 		} finally {
 			rmSync(homeDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("discoverSubAgents", () => {
+	test("returns an empty array when .claude/agents does not exist", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		try {
+			assert.deepEqual(discoverSubAgents(rootDir), []);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("parses name, description, and comma-separated tools from an agent's frontmatter", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		try {
+			writeAgent(
+				rootDir,
+				"code-reviewer",
+				"---\nname: code-reviewer\ndescription: Reviews code for bugs.\ntools: Read, Grep, Bash\n---\n\nSystem prompt body.\n",
+			);
+			assert.deepEqual(discoverSubAgents(rootDir), [
+				{ name: "code-reviewer", description: "Reviews code for bugs.", tools: ["Read", "Grep", "Bash"] },
+			]);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("defaults tools to an empty array when the frontmatter has no tools field", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		try {
+			writeAgent(rootDir, "no-tools-agent", "---\nname: no-tools-agent\ndescription: An agent with no declared tools.\n---\n");
+			assert.deepEqual(discoverSubAgents(rootDir), [
+				{ name: "no-tools-agent", description: "An agent with no declared tools.", tools: [] },
+			]);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("skips an agent file missing name or description", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		try {
+			writeAgent(rootDir, "incomplete", "---\nname: incomplete\n---\n");
+			assert.deepEqual(discoverSubAgents(rootDir), []);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("skips a non-.md file under .claude/agents", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		try {
+			mkdirSync(join(rootDir, ".claude", "agents"), { recursive: true });
+			writeFileSync(join(rootDir, ".claude", "agents", "README.txt"), "not an agent");
+			assert.deepEqual(discoverSubAgents(rootDir), []);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("truncates a description longer than 300 characters to exactly 300", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		try {
+			const longDescription = "z".repeat(400);
+			writeAgent(rootDir, "verbose-agent", `---\nname: verbose-agent\ndescription: ${longDescription}\n---\n`);
+			const agents = discoverSubAgents(rootDir);
+			assert.equal(agents.length, 1);
+			assert.equal(agents[0].description.length, 300);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("caps discovered sub-agents at 50", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		try {
+			for (let i = 0; i < 70; i++) {
+				const name = `agent-${String(i).padStart(3, "0")}`;
+				writeAgent(rootDir, name, `---\nname: ${name}\ndescription: Agent number ${i}.\n---\n`);
+			}
+			assert.equal(discoverSubAgents(rootDir).length, 50);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
 		}
 	});
 });

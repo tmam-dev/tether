@@ -14,6 +14,12 @@ export interface SkillEntry {
 	source: "project" | "user";
 }
 
+export interface SubAgentEntry {
+	name: string;
+	description: string;
+	tools: string[];
+}
+
 export interface HarnessManifest {
 	schemaVersion: 1;
 	skills: SkillEntry[];
@@ -28,6 +34,7 @@ const MAX_DESCRIPTION_LENGTH = 300;
 // (name only) ~= 58KB -- safely under budget with headroom for the run's
 // other span attributes.
 const MAX_SKILLS = 50;
+const MAX_SUB_AGENTS = 50;
 
 function parseFrontmatter(content: string): Record<string, string> | null {
 	const lines = content.split("\n");
@@ -101,6 +108,54 @@ export function discoverSkills(rootDir: string): SkillEntry[] {
  */
 export function discoverUserSkills(homeDir: string = homedir()): SkillEntry[] {
 	return scanSkillsDir(join(homeDir, ".claude", "skills"), "user");
+}
+
+/**
+ * Reads rootDir/.claude/agents/[name].md frontmatter (name, description,
+ * and an optional comma-separated tools field). A missing .claude/agents
+ * directory, a non-.md file, or frontmatter missing name/description is
+ * skipped, never thrown. tools defaults to an empty array when absent --
+ * unlike name/description, a missing tools field is not treated as an
+ * incomplete entry.
+ *
+ * Bounded the same way as discoverSkills: descriptions truncated to
+ * MAX_DESCRIPTION_LENGTH, output capped at MAX_SUB_AGENTS entries.
+ */
+export function discoverSubAgents(rootDir: string): SubAgentEntry[] {
+	const agentsDir = join(rootDir, ".claude", "agents");
+	let entries: string[];
+	try {
+		entries = readdirSync(agentsDir);
+	} catch {
+		return [];
+	}
+
+	const agents: SubAgentEntry[] = [];
+	for (const entry of entries) {
+		if (agents.length >= MAX_SUB_AGENTS) break;
+		if (!entry.endsWith(".md")) continue;
+
+		const agentPath = join(agentsDir, entry);
+		let content: string;
+		try {
+			if (!statSync(agentPath).isFile()) continue;
+			content = readFileSync(agentPath, "utf-8");
+		} catch {
+			continue;
+		}
+
+		const frontmatter = parseFrontmatter(content);
+		if (!frontmatter?.name || !frontmatter?.description) continue;
+		const tools = frontmatter.tools
+			? frontmatter.tools.split(",").map((t) => t.trim()).filter((t) => t.length > 0)
+			: [];
+		agents.push({
+			name: frontmatter.name,
+			description: frontmatter.description.slice(0, MAX_DESCRIPTION_LENGTH),
+			tools,
+		});
+	}
+	return agents;
 }
 
 export function buildHarnessManifest(rootDir: string, homeDir: string = homedir()): HarnessManifest {
