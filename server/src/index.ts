@@ -9,6 +9,13 @@ import { join } from "node:path";
 import { openDatabase, resolveDataDir } from "./db.js";
 import { createTetherServer } from "./server.js";
 
+process.on("unhandledRejection", (err) => {
+	console.error("Unhandled rejection:", err);
+});
+process.on("uncaughtException", (err) => {
+	console.error("Uncaught exception:", err);
+});
+
 const DEFAULT_PORT = 4319;
 const port = Number(process.env.TETHER_PORT ?? DEFAULT_PORT);
 const dbPath = join(resolveDataDir(), "tether.sqlite");

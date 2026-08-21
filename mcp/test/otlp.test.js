@@ -72,7 +72,7 @@ describe("sendSpan", () => {
 				BASE_SPAN,
 			);
 			assert.equal(capturedHeaders["Content-Type"], "application/json");
-			assert.equal(capturedHeaders["User-Agent"], "trail-mcp/0.1.0");
+			assert.equal(capturedHeaders["User-Agent"], "trail-mcp/0.2.0");
 		} finally {
 			restore();
 		}

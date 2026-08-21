@@ -180,3 +180,30 @@ describe("unknown routes", () => {
 		});
 	});
 });
+
+describe("GET / error handling", () => {
+	test("returns 500 (not a crash) when the database connection is closed", async () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		const server = createTetherServer(db);
+		await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const port = server.address().port;
+		try {
+			db.close();
+
+			const res = await fetch(`http://127.0.0.1:${port}/`);
+			assert.equal(res.status, 500);
+			const body = await res.json();
+			assert.equal(body.ok, false);
+			assert.equal(typeof body.error, "string");
+		} finally {
+			await new Promise((resolve) => server.close(resolve));
+			try {
+				db.close();
+			} catch {
+				// already closed above; better-sqlite3 throws on a double close
+			}
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+});

@@ -24,7 +24,7 @@ import { buildHarnessManifest, HarnessManifest } from "./manifest.js";
 import { judgeGoalAttainment, JudgeConfig, Verdict } from "./judge.js";
 
 // ---------------------------------------------------------------- config
-const DEFAULT_LOCAL_URL = "http://localhost:4319";
+const DEFAULT_LOCAL_URL = "http://127.0.0.1:4319";
 
 const cfg: TrailConfig = {
 	url: process.env.TRAIL_URL ?? DEFAULT_LOCAL_URL,

@@ -71,8 +71,14 @@ export function createTetherServer(db: Database.Database): Server {
 		}
 
 		if (req.method === "GET" && req.url === "/") {
-			res.writeHead(200, { "Content-Type": "text/html" });
-			res.end(renderPlaceholderPage(countTraces(db)));
+			try {
+				const page = renderPlaceholderPage(countTraces(db));
+				res.writeHead(200, { "Content-Type": "text/html" });
+				res.end(page);
+			} catch (err) {
+				res.writeHead(500, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ ok: false, error: (err as Error).message }));
+			}
 			return;
 		}
 

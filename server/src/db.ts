@@ -9,7 +9,7 @@
 
 import Database from "better-sqlite3";
 import envPaths from "env-paths";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 
 export interface StoredSpan {
@@ -29,8 +29,9 @@ export function resolveDataDir(): string {
 
 /** Opens (creating if needed) the spans database at the given path. Safe to call repeatedly on the same path. */
 export function openDatabase(dbPath: string): Database.Database {
-	mkdirSync(dirname(dbPath), { recursive: true });
+	mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
 	const db = new Database(dbPath);
+	chmodSync(dbPath, 0o600);
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS spans (
 			traceId TEXT NOT NULL,

@@ -1,8 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { tmpdir, platform } from "node:os";
 import { openDatabase, insertSpan, countTraces } from "../dist/db.js";
 
 function makeTempDbPath() {
@@ -42,6 +42,25 @@ describe("openDatabase", () => {
 		} finally {
 			db2.close();
 			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("locks down the data directory (0700) and the sqlite file (0600) on POSIX", { skip: platform() === "win32" }, () => {
+		// Use a nested subdirectory that does not exist yet, so this actually
+		// exercises openDatabase's mkdirSync(..., { mode: 0o700 }) rather than
+		// incidentally passing because mkdtempSync's own temp dir happens to
+		// already be 0700.
+		const parent = mkdtempSync(join(tmpdir(), "tether-db-test-"));
+		const dbPath = join(parent, "nested", "test.sqlite");
+		const db = openDatabase(dbPath);
+		try {
+			const dirMode = statSync(dirname(dbPath)).mode & 0o777;
+			const fileMode = statSync(dbPath).mode & 0o777;
+			assert.equal(dirMode, 0o700);
+			assert.equal(fileMode, 0o600);
+		} finally {
+			db.close();
+			rmSync(parent, { recursive: true, force: true });
 		}
 	});
 });

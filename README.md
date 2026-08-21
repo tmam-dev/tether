@@ -8,9 +8,12 @@ agent's work after the fact instead of losing track of it — hence the name.
 
 ## Status
 
-Pre-implementation. This repo currently holds only licensing scaffolding;
-the actual local self-hosted app (install, datastore, UI) hasn't been built
-yet. Private for now — visibility will change once there's something real to
+The local server (`npx trailai-tether` — install, SQLite storage, OTLP
+ingestion) is built; see [`server/README.md`](server/README.md) and
+[`mcp/README.md`](mcp/README.md) for details. The real Flight Recorder UI
+(run timeline, goal-attainment verdict, harness anatomy) is still ahead —
+today's server only serves a placeholder page confirming it's running.
+Private for now — visibility will change once there's something real to
 show.
 
 ## Relationship to Trail
