@@ -352,6 +352,20 @@ function setRailActive(traceId: string | null): void {
 	});
 }
 
+function updateHarnessTab(traceId: string | null): void {
+	const tab = document.querySelector('[data-nav="harness"]');
+	if (!tab) return;
+	if (traceId) {
+		tab.setAttribute("href", `/runs/${encodeURIComponent(traceId)}/harness`);
+		tab.classList.remove("tab-disabled");
+		tab.removeAttribute("aria-disabled");
+	} else {
+		tab.removeAttribute("href");
+		tab.classList.add("tab-disabled");
+		tab.setAttribute("aria-disabled", "true");
+	}
+}
+
 function mountRunDataIfPresent(): void {
 	const dataEl = document.getElementById("run-data");
 	if (!dataEl) return;
@@ -403,6 +417,7 @@ async function navigateTo(pathname: string, push: boolean): Promise<void> {
 
 	setTabActive(target.view);
 	setRailActive(target.view === "analytics" ? null : target.traceId);
+	updateHarnessTab(target.view === "analytics" ? null : target.traceId);
 	if (push) window.history.pushState(null, "", pathname);
 }
 
@@ -410,6 +425,7 @@ function onRailOrTabClick(e: MouseEvent): void {
 	const targetEl = e.target as Element | null;
 	const anchor = targetEl?.closest("a[data-trace-id], a[data-nav]");
 	if (!anchor) return;
+	if (anchor.getAttribute("aria-disabled") === "true") return;
 	if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 	e.preventDefault();
 	navigateTo(new URL((anchor as HTMLAnchorElement).href).pathname, true);

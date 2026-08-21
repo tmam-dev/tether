@@ -32,6 +32,12 @@ describe("renderShell", () => {
 		assert.match(html, new RegExp(`href="/runs/${"b".repeat(32)}/harness"[^>]*class="tab tab-active"|class="tab tab-active"[^>]*href="/runs/${"b".repeat(32)}/harness"`));
 	});
 
+	test("Harness tab is always an <a data-nav=\"harness\"> element, never a <span>, even when disabled", () => {
+		const html = renderShell({ view: "analytics" }, "Tether", "", "");
+		assert.match(html, /<a class="tab tab-disabled"/);
+		assert.doesNotMatch(html, /<span class="tab tab-disabled"/);
+	});
+
 	test("Analytics tab is marked active on the analytics view", () => {
 		const html = renderShell({ view: "analytics" }, "Tether", "", "");
 		assert.match(html, /href="\/analytics" data-nav="analytics" class="tab tab-active"|class="tab tab-active" href="\/analytics"/);

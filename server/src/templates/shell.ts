@@ -211,9 +211,11 @@ const STYLE = `
 `;
 
 function topbar(state: ShellState): string {
-	const harnessTab = state.traceId
-		? `<a class="tab${state.view === "harness" ? " tab-active" : ""}" href="/runs/${escapeHtml(state.traceId)}/harness" data-nav="harness">Harness</a>`
-		: `<span class="tab tab-disabled" aria-disabled="true">Harness</span>`;
+	const disabled = !state.traceId;
+	const hrefAttr = state.traceId ? ` href="/runs/${escapeHtml(state.traceId)}/harness"` : "";
+	const disabledAttr = disabled ? ' aria-disabled="true"' : "";
+	const classes = ["tab", state.view === "harness" ? "tab-active" : "", disabled ? "tab-disabled" : ""].filter(Boolean).join(" ");
+	const harnessTab = `<a class="${classes}"${hrefAttr} data-nav="harness"${disabledAttr}>Harness</a>`;
 	const analyticsTab = `<a class="tab${state.view === "analytics" ? " tab-active" : ""}" href="/analytics" data-nav="analytics">Analytics</a>`;
 	return `<div class="tabbar">
 		${harnessTab}

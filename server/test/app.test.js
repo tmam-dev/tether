@@ -99,7 +99,7 @@ function loadApp() {
 		fetch: () => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") }),
 		__TETHER_INITIAL__: undefined,
 	};
-	const sandbox = { document: documentStub, window: windowStub, history: windowStub.history, location: windowStub.location, setInterval: windowStub.setInterval, fetch: windowStub.fetch, console };
+	const sandbox = { document: documentStub, window: windowStub, history: windowStub.history, location: windowStub.location, setInterval: windowStub.setInterval, fetch: windowStub.fetch, console, URL };
 	vm.createContext(sandbox);
 	vm.runInContext(src, sandbox, { filename: "app.js" });
 	// vm contexts are a separate realm: plain objects returned from sandbox code have a
@@ -229,5 +229,58 @@ describe("router: navigation", () => {
 		assert.equal((windowListeners.mousemove ?? []).length, 0);
 		assert.equal((windowListeners.mouseup ?? []).length, 0);
 		assert.equal(elements.content.innerHTML, "<p>analytics body</p>");
+	});
+});
+
+describe("router: Harness tab sync", () => {
+	test("navigateTo updates the Harness tab's href to the newly-selected run", async () => {
+		const { windowStub, sandbox } = loadApp();
+		const harnessTab = new FakeElement("harnessTab", null);
+		let setHref = null;
+		harnessTab.setAttribute = (n, v) => { if (n === "href") setHref = v; };
+		harnessTab.removeAttribute = () => {};
+		harnessTab.classList = { toggle() {}, contains() { return false; }, add() {}, remove() {} };
+		sandbox.document.querySelector = (sel) => (sel === '[data-nav="harness"]' ? harnessTab : null);
+
+		windowStub.fetch = (url) => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("<p>run body</p>") });
+		await sandbox.navigateTo("/runs/" + "f".repeat(32), true);
+
+		assert.equal(setHref, "/runs/" + "f".repeat(32) + "/harness");
+	});
+
+	test("navigateTo to /analytics disables the Harness tab", async () => {
+		const { windowStub, sandbox } = loadApp();
+		const harnessTab = new FakeElement("harnessTab", null);
+		let removedHref = false;
+		let addedDisabledClass = false;
+		let ariaDisabled = null;
+		harnessTab.removeAttribute = (n) => { if (n === "href") removedHref = true; };
+		harnessTab.setAttribute = (n, v) => { if (n === "aria-disabled") ariaDisabled = v; };
+		harnessTab.classList = { toggle() {}, contains() { return false; }, add: (c) => { if (c === "tab-disabled") addedDisabledClass = true; }, remove() {} };
+		sandbox.document.querySelector = (sel) => (sel === '[data-nav="harness"]' ? harnessTab : null);
+
+		windowStub.fetch = () => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("<p>analytics body</p>") });
+		await sandbox.navigateTo("/analytics", true);
+
+		assert.equal(removedHref, true);
+		assert.equal(addedDisabledClass, true);
+		assert.equal(ariaDisabled, "true");
+	});
+
+	test("clicking a disabled Harness tab does not trigger navigation", () => {
+		const { sandbox } = loadApp();
+		let navigated = false;
+		sandbox.navigateTo = () => { navigated = true; return Promise.resolve(); };
+
+		const anchor = {
+			getAttribute: (n) => (n === "aria-disabled" ? "true" : null),
+			href: "http://localhost/runs/" + "g".repeat(32) + "/harness",
+		};
+		const targetEl = { closest: () => anchor };
+		const event = { target: targetEl, button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, preventDefault: () => {} };
+
+		sandbox.onRailOrTabClick(event);
+
+		assert.equal(navigated, false);
 	});
 });
