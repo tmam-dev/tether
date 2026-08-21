@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openDatabase, insertSpan } from "../dist/db.js";
-import { getRun, listRuns } from "../dist/runs.js";
+import { getRun, listRuns, getAllTraceIds } from "../dist/runs.js";
 
 function makeTempDbPath() {
 	const dir = mkdtempSync(join(tmpdir(), "tether-runs-test-"));
@@ -444,6 +444,47 @@ describe("listRuns", () => {
 			});
 			const runs = listRuns(db, 10);
 			assert.equal(runs[0].goal, "fallback-name");
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+});
+
+describe("getAllTraceIds", () => {
+	test("returns an empty array when there are no runs", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			assert.deepEqual(getAllTraceIds(db), []);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("returns every root span's traceId, uncapped, regardless of order", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			for (let i = 0; i < 5; i++) {
+				insertSpan(db, rootSpan({ traceId: `trace-${i}`, spanId: `root-${i}`, goal: `run ${i}`, agent: "a", startNs: `${1000000000000 + i}`, endNs: `${1001000000000 + i}` }));
+			}
+			const ids = getAllTraceIds(db).sort();
+			assert.deepEqual(ids, ["trace-0", "trace-1", "trace-2", "trace-3", "trace-4"]);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("excludes child spans, only returns root spans", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "t1", spanId: "r1", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1001000000000" }));
+			insertSpan(db, stepSpan({ traceId: "t1", spanId: "s1", parentSpanId: "r1", name: "a step", startNs: "1000000500000", endNs: "1000000900000", toolName: "x" }));
+			assert.deepEqual(getAllTraceIds(db), ["t1"]);
 		} finally {
 			db.close();
 			rmSync(join(dbPath, ".."), { recursive: true, force: true });

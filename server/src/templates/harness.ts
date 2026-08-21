@@ -96,6 +96,7 @@ export function renderHarnessPage(view: HarnessView | null, runs: RunSummary[]):
 	<div class="topbar">
 		<div class="brand"><div class="brand-name">Tether</div><div class="brand-sub">Harness</div></div>
 		<a class="backlink" href="/">&larr; All runs</a>
+		<a class="backlink" href="/analytics">Analytics</a>
 	</div>
 	${body}
 </div>`;

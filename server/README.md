@@ -44,6 +44,13 @@ claude mcp add trail -- npx -y trailai-mcp
   skills, sub-agents, and MCP servers a run's harness had available, reshaped
   from the manifest `mcp/` stamps on every run. Defaults to the most recent
   run; use the picker (or the query param) to see an older run's snapshot.
+- `GET /analytics` — aggregates coverage across every run in the local
+  store: which skills/sub-agents/MCP servers are used vs. registered but
+  never touched ("dead weight"), reshaped from the same per-run coverage
+  data the Flight Recorder page's Coverage panel already computes. No
+  correlation with failures/retries/cost -- that's real statistical work
+  left for a future increment once there's enough real usage data to make
+  it meaningful.
 
 ## Building from source
 

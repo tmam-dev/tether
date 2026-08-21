@@ -264,3 +264,9 @@ export function listRuns(db: Database.Database, limit: number): RunSummary[] {
 	}
 	return summaries;
 }
+
+/** Every root span's traceId, unordered, uncapped. Used only for store-wide aggregation (usage analytics) -- everything else in this codebase deliberately caps and orders by recency. */
+export function getAllTraceIds(db: Database.Database): string[] {
+	const rows = db.prepare("SELECT traceId FROM spans WHERE parentSpanId IS NULL").all() as { traceId: string }[];
+	return rows.map((r) => r.traceId);
+}

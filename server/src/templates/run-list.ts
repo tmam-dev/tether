@@ -36,7 +36,7 @@ export function renderRunListPage(runs: RunSummary[]): string {
 	.nav { font-size:12px; color:#8A8F97; margin-bottom:10px; }
 </style>
 <div class="wrap">
-	<div class="nav"><a href="/">Runs</a> · <a href="/harness">Harness</a></div>
+	<div class="nav"><a href="/">Runs</a> · <a href="/harness">Harness</a> · <a href="/analytics">Analytics</a></div>
 	<h1>Tether — Runs</h1>
 	${empty}
 	${runs.length ? `<table><thead><tr><th>Goal</th><th>Verdict</th><th>Duration</th><th>Started</th></tr></thead><tbody>${rows}</tbody></table>` : ""}

@@ -169,6 +169,14 @@ describe("GET /", () => {
 		});
 	});
 
+	test("links to the analytics page from the nav", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/`);
+			const text = await res.text();
+			assert.match(text, /href="\/analytics"/);
+		});
+	});
+
 	test("lists the run after a POST /traces, linking to its detail page", async () => {
 		await withServer(async ({ port }) => {
 			await fetch(`http://127.0.0.1:${port}/traces`, {
@@ -351,6 +359,19 @@ describe("GET /runs/:traceId", () => {
 			assert.match(text, /href="\/harness"/);
 		});
 	});
+
+	test("links to the analytics page from the topbar", async () => {
+		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(otlpPayload()),
+			});
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}`);
+			const text = await res.text();
+			assert.match(text, /href="\/analytics"/);
+		});
+	});
 });
 
 describe("GET /harness", () => {
@@ -419,6 +440,45 @@ describe("GET /harness", () => {
 			const olderText = await olderRes.text();
 			assert.match(olderText, /Harness as of: <strong>older-run<\/strong>/);
 			assert.doesNotMatch(olderText, /Harness as of: <strong>newer-run<\/strong>/);
+		});
+	});
+
+	test("links to the analytics page from the topbar", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/harness`);
+			const text = await res.text();
+			assert.match(text, /href="\/analytics"/);
+		});
+	});
+});
+
+describe("GET /analytics", () => {
+	test("shows an empty-state page before any ingestion", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/analytics`);
+			assert.equal(res.status, 200);
+			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+			const text = await res.text();
+			assert.match(text, /No runs yet/);
+		});
+	});
+
+	test("reflects real ingested run data", async () => {
+		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(otlpPayload()),
+			});
+			const res = await fetch(`http://127.0.0.1:${port}/analytics`);
+			assert.equal(res.status, 200);
+			const text = await res.text();
+			// otlpPayload's single span has no child steps at all, so its run is
+			// untracked (no step ever reported a source) -- the "no runs have
+			// reported usage yet" message is the correct, honest outcome here,
+			// not the "nothing registered" one (that's for tracked runs with an
+			// empty manifest, a different case).
+			assert.match(text, /No runs have reported skill\/sub-agent\/MCP-server usage yet/);
 		});
 	});
 });
