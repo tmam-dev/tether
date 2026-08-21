@@ -43,7 +43,9 @@ async function readBody(req: IncomingMessage): Promise<string> {
 
 export function createTetherServer(db: Database.Database): Server {
 	return createServer(async (req, res) => {
-		if (req.method === "POST" && req.url === "/traces") {
+		const pathname = (req.url ?? "").split("?")[0];
+
+		if (req.method === "POST" && pathname === "/traces") {
 			try {
 				const bodyText = await readBody(req);
 				const parsed = JSON.parse(bodyText);
@@ -68,7 +70,7 @@ export function createTetherServer(db: Database.Database): Server {
 			return;
 		}
 
-		if (req.method === "GET" && req.url === "/") {
+		if (req.method === "GET" && pathname === "/") {
 			try {
 				const page = renderRunListPage(listRuns(db, 50));
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -80,8 +82,15 @@ export function createTetherServer(db: Database.Database): Server {
 			return;
 		}
 
-		if (req.method === "GET" && req.url?.startsWith("/runs/")) {
-			const traceId = req.url.slice("/runs/".length);
+		if (req.method === "GET" && pathname.startsWith("/runs/")) {
+			let traceId: string;
+			try {
+				traceId = decodeURIComponent(pathname.slice("/runs/".length));
+			} catch {
+				res.writeHead(400, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ ok: false, error: "malformed traceId" }));
+				return;
+			}
 			try {
 				const run = getRun(db, traceId);
 				if (!run) {

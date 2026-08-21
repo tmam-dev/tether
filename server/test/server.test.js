@@ -175,6 +175,14 @@ describe("GET /", () => {
 		});
 	});
 
+	test("ignores a query string when matching the route", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/?foo=1`);
+			assert.equal(res.status, 200);
+			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+		});
+	});
+
 	test("escapes a double quote in traceId so it cannot break out of the href attribute", () => {
 		const html = renderRunListPage([
 			{
@@ -214,6 +222,28 @@ describe("GET /runs/:traceId", () => {
 		await withServer(async ({ port }) => {
 			const res = await fetch(`http://127.0.0.1:${port}/runs/${"f".repeat(32)}`);
 			assert.equal(res.status, 404);
+		});
+	});
+
+	test("URL-decodes the traceId before lookup", async () => {
+		await withServer(async ({ port }) => {
+			// %61 decodes to 'a' -- must resolve to the same run as a literal "a".repeat(32).
+			await fetch(`http://127.0.0.1:${port}/traces`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(otlpPayload()),
+			});
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${"%61".repeat(32)}`);
+			assert.equal(res.status, 200);
+			const text = await res.text();
+			assert.match(text, /Flight Recorder/);
+		});
+	});
+
+	test("returns 400 (not a crash) for a malformed percent-encoded traceId", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/runs/%`);
+			assert.equal(res.status, 400);
 		});
 	});
 });
