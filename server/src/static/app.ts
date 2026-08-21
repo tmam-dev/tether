@@ -1,7 +1,4 @@
-import type { RunView } from "../runs.js";
-import type { CoverageView } from "../coverage.js";
-
-type RunData = RunView & { coverage: CoverageView | null };
+type RunData = import("../runs.js").RunView & { coverage: import("../coverage.js").CoverageView | null };
 
 function $<T extends HTMLElement = HTMLElement>(id: string): T {
 	const el = document.getElementById(id);
