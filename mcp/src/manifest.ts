@@ -35,10 +35,12 @@ const FRONTMATTER_DELIMITER = "---";
 const MAX_DESCRIPTION_LENGTH = 300;
 // 50, not 200: this manifest now has four categories (project skills, user
 // skills, sub-agents, MCP servers) sharing one ~100KB request-body budget.
-// Worst case: 3 categories x 50 entries x ~370 bytes (name + 300-char
-// description + JSON overhead) + 50 MCP-server entries x ~50 bytes
-// (name only) ~= 58KB -- safely under budget with headroom for the run's
-// other span attributes.
+// This substantially reduces (but does not hard-guarantee) worst-case size
+// versus the prior MAX_SKILLS=200 baseline: MAX_DESCRIPTION_LENGTH bounds
+// characters, not bytes (non-ASCII descriptions can exceed the assumed
+// byte count), and neither `name` fields nor a sub-agent's `tools` array
+// length are capped yet. A byte-based final size guard is tracked as
+// follow-up work, not yet implemented.
 const MAX_SKILLS = 50;
 const MAX_SUB_AGENTS = 50;
 const MAX_MCP_SERVERS = 50;
@@ -209,7 +211,7 @@ export function discoverMcpServers(rootDir: string, claudeJsonPath: string = joi
 export function buildHarnessManifest(
 	rootDir: string,
 	homeDir: string = homedir(),
-	claudeJsonPath: string = join(homedir(), ".claude.json"),
+	claudeJsonPath: string = join(homeDir, ".claude.json"),
 ): HarnessManifest {
 	return {
 		schemaVersion: 2,

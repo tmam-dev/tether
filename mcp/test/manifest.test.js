@@ -451,4 +451,35 @@ describe("buildHarnessManifest", () => {
 			rmSync(homeDir, { recursive: true, force: true });
 		}
 	});
+
+	test("with only rootDir and homeDir given, discovers MCP servers from ~/.claude.json under the given homeDir, not the real home directory", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		const homeDir = makeTempDir("trail-manifest-home-test-");
+		try {
+			writeFileSync(
+				join(homeDir, ".claude.json"),
+				JSON.stringify({
+					projects: {
+						[rootDir]: {
+							mcpServers: {
+								"distinctive-homedir-server": { command: "npx", args: ["-y", "some-mcp"] },
+							},
+						},
+					},
+				}),
+			);
+
+			// Only two args: claudeJsonPath must default from the given homeDir,
+			// not from a fresh call to the real homedir().
+			const manifest = buildHarnessManifest(rootDir, homeDir);
+
+			assert.deepEqual(
+				manifest.mcpServers.map((s) => s.name),
+				["distinctive-homedir-server"],
+			);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+			rmSync(homeDir, { recursive: true, force: true });
+		}
+	});
 });

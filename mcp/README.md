@@ -83,7 +83,7 @@ Environment variables:
 | `TRAIL_SECRET_KEY` | yes      | From Settings → API Keys                    |
 | `TRAIL_APP`        | no       | Service/agent name in the UI (`coding-agent`) |
 | `TRAIL_ENV`        | no       | Environment tag (`default`)                 |
-| `TRAIL_PROJECT_ROOT` | no   | Project root to discover `.claude/skills/` from (default: process cwd) |
+| `TRAIL_PROJECT_ROOT` | no   | Project root to discover the harness manifest from (skills, sub-agents, .mcp.json — default: process cwd) |
 | `TRAIL_JUDGE_PROVIDER` | no   | LLM provider for the goal-attainment judge — only `openai` supported today |
 | `TRAIL_JUDGE_API_KEY`  | no   | API key for the judge provider              |
 | `TRAIL_JUDGE_MODEL`    | no   | Judge model id, default `gpt-4o-mini`       |
