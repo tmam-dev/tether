@@ -247,8 +247,7 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
     run:    '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M7.5 9.5l3 2.5-3 2.5M12.5 15h4"/>',
     tool:   '<path d="M14.5 6.5a3.5 3.5 0 0 0-4.8 4.2l-5 5a1.6 1.6 0 0 0 2.3 2.3l5-5a3.5 3.5 0 0 0 4.2-4.8l-2.1 2.1-1.9-.2-.2-1.9Z"/>',
     llm:    '<circle cx="12" cy="12" r="2.2"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.5 1.5M16.2 16.2l1.5 1.5M17.7 6.3l-1.5 1.5M7.8 16.2l-1.5 1.5"/>',
-    search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.3-4.3"/>',
-    done:   '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-4.9"/>'
+    search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.3-4.3"/>'
   };
   const SVG_LOOP = '<path d="M4 9a7 7 0 0 1 12-4l2 2M20 15a7 7 0 0 1-12 4l-2-2"/><path d="M18 3v4h-4M6 21v-4h4"/>';
   function icon(t) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + (I[t] || I.tool) + '</svg>'; }
@@ -258,7 +257,7 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
     reason: ['#8A85F2', 'rgba(138,133,242,0.14)'], read: ['#5C93C4', 'rgba(92,147,196,0.14)'],
     edit: ['#19b0c0', 'rgba(25,176,192,0.15)'], run: ['#C98A5E', 'rgba(201,138,94,0.15)'],
     tool: ['#C77DBB', 'rgba(199,125,187,0.14)'], llm: ['#5FA8D3', 'rgba(95,168,211,0.14)'],
-    search: ['#6FA96B', 'rgba(111,169,107,0.14)'], done: ['#2FA24A', 'rgba(47,162,74,0.15)']
+    search: ['#6FA96B', 'rgba(111,169,107,0.14)']
   };
   const VERDICT = {
     met:      { label:'Goal met',    color:'var(--met)',     wash:'var(--met-wash)',     line:'rgba(47,162,74,0.35)',  glyph:'<circle cx="12" cy="12" r="9"/><path d="M8 12.3l2.6 2.6L16 9.2"/>' },
@@ -362,7 +361,7 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
     if (!r.steps.length) { el.innerHTML = '<div class="insp-empty" style="padding:14px">No steps logged for this run.</div>'; return; }
     el.innerHTML = r.steps.map((s,i) => {
       const [c,w] = TYPE_COLOR[s.type];
-      const stat = s.status==='err' ? '<span class="stat-chip stat-err">error</span>' : (s.type==='done' ? '<span class="stat-chip stat-ok">done</span>' : '');
+      const stat = s.status==='err' ? '<span class="stat-chip stat-err">error</span>' : '';
       const metaBits = [ 't+'+fmtT(s.start), s.dur+'s'+(fmtCost(s.cost)?(' · '+fmtCost(s.cost)):'') ];
       return '<div class="step" data-i="'+i+'" role="button" tabindex="0" aria-selected="false" style="--tc:'+c+';--tc-wash:'+w+'">'
         + '<div class="rail"><div class="tick">'+icon(s.type)+'</div></div>'
