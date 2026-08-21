@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openDatabase, countTraces } from "../dist/db.js";
+import { getRun } from "../dist/runs.js";
 import { createTetherServer } from "../dist/server.js";
 
 function makeTempDbPath() {
@@ -149,16 +150,16 @@ describe("POST /traces", () => {
 });
 
 describe("GET /", () => {
-	test("returns a page reporting zero runs before any ingestion", async () => {
+	test("returns a page with no run links before any ingestion", async () => {
 		await withServer(async ({ port }) => {
 			const res = await fetch(`http://127.0.0.1:${port}/`);
 			assert.equal(res.status, 200);
 			const text = await res.text();
-			assert.match(text, /0 runs/);
+			assert.equal(text.includes("/runs/"), false);
 		});
 	});
 
-	test("reflects the ingested trace count after a POST /traces", async () => {
+	test("lists the run after a POST /traces, linking to its detail page", async () => {
 		await withServer(async ({ port }) => {
 			await fetch(`http://127.0.0.1:${port}/traces`, {
 				method: "POST",
@@ -167,7 +168,32 @@ describe("GET /", () => {
 			});
 			const res = await fetch(`http://127.0.0.1:${port}/`);
 			const text = await res.text();
-			assert.match(text, /1 run(?!s)/);
+			assert.match(text, new RegExp(`/runs/${"a".repeat(32)}`));
+			assert.match(text, /test-span/);
+		});
+	});
+});
+
+describe("GET /runs/:traceId", () => {
+	test("renders the Flight Recorder page for a run that exists", async () => {
+		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(otlpPayload()),
+			});
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}`);
+			assert.equal(res.status, 200);
+			const text = await res.text();
+			assert.match(text, /Flight Recorder/);
+			assert.match(text, /test-span/);
+		});
+	});
+
+	test("returns 404 for a traceId with no matching run", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${"f".repeat(32)}`);
+			assert.equal(res.status, 404);
 		});
 	});
 });

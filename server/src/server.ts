@@ -1,13 +1,16 @@
 /**
  * Tether's local HTTP server: accepts the same OTLP/JSON payload
- * mcp/src/otlp.ts sends, stores every span, and serves a placeholder page
- * confirming it's running. No auth -- binds 127.0.0.1 only (see index.ts),
- * nothing here checks headers.
+ * mcp/src/otlp.ts sends, stores every span, and serves a run list page
+ * plus a per-run Flight Recorder page. No auth -- binds 127.0.0.1 only
+ * (see index.ts), nothing here checks headers.
  */
 
 import { createServer, IncomingMessage, Server } from "node:http";
 import type Database from "better-sqlite3";
-import { insertSpan, countTraces } from "./db.js";
+import { insertSpan } from "./db.js";
+import { getRun, listRuns } from "./runs.js";
+import { renderFlightRecorderPage } from "./templates/flight-recorder.js";
+import { renderRunListPage } from "./templates/run-list.js";
 
 interface OtlpSpan {
 	traceId: string;
@@ -36,11 +39,6 @@ async function readBody(req: IncomingMessage): Promise<string> {
 	const chunks: Buffer[] = [];
 	for await (const chunk of req) chunks.push(chunk as Buffer);
 	return Buffer.concat(chunks).toString("utf-8");
-}
-
-function renderPlaceholderPage(traceCount: number): string {
-	const label = traceCount === 1 ? "1 run" : `${traceCount} runs`;
-	return `<!doctype html><html><head><title>Tether</title></head><body><h1>Tether is running</h1><p>${label} ingested.</p></body></html>`;
 }
 
 export function createTetherServer(db: Database.Database): Server {
@@ -72,7 +70,26 @@ export function createTetherServer(db: Database.Database): Server {
 
 		if (req.method === "GET" && req.url === "/") {
 			try {
-				const page = renderPlaceholderPage(countTraces(db));
+				const page = renderRunListPage(listRuns(db, 50));
+				res.writeHead(200, { "Content-Type": "text/html" });
+				res.end(page);
+			} catch (err) {
+				res.writeHead(500, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ ok: false, error: (err as Error).message }));
+			}
+			return;
+		}
+
+		if (req.method === "GET" && req.url?.startsWith("/runs/")) {
+			const traceId = req.url.slice("/runs/".length);
+			try {
+				const run = getRun(db, traceId);
+				if (!run) {
+					res.writeHead(404, { "Content-Type": "application/json" });
+					res.end(JSON.stringify({ ok: false, error: "run not found" }));
+					return;
+				}
+				const page = renderFlightRecorderPage(run);
 				res.writeHead(200, { "Content-Type": "text/html" });
 				res.end(page);
 			} catch (err) {
