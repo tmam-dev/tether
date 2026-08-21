@@ -29,28 +29,25 @@ claude mcp add trail -- npx -y trailai-mcp
 - `POST /traces` — OTLP/JSON ingestion, matches the wire format
   `trailai-mcp` already sends. No auth (nothing to protect on one
   developer's own machine).
-- `GET /` — a run list: goal, verdict, duration, start time, linking into each
-  run's detail page.
-- `GET /runs/:traceId` — the Flight Recorder view for one run: goal, verdict
-  (when a judge is configured), a scrubbable step timeline with play/pause/
-  speed controls, per-step expansion showing raw input/output, and a
-  Coverage panel showing which of the run's harness manifest entries
-  (skills/sub-agents/MCP servers) were actually used, when the coding agent
-  reports that attribution. Adapted from a design prototype, cut down to
-  exactly what's captured today — no pinned criteria, sub-goals,
-  guardrail/eval signals, diffs, or context-window inspector, since none of
-  that data exists yet.
-- `GET /harness` (optionally `?run=<traceId>`) — the harness anatomy page: the
-  skills, sub-agents, and MCP servers a run's harness had available, reshaped
-  from the manifest `mcp/` stamps on every run. Defaults to the most recent
-  run; use the picker (or the query param) to see an older run's snapshot.
-- `GET /analytics` — aggregates coverage across every run in the local
-  store: which skills/sub-agents/MCP servers are used vs. registered but
-  never touched ("dead weight"), reshaped from the same per-run coverage
-  data the Flight Recorder page's Coverage panel already computes. No
-  correlation with failures/retries/cost -- that's real statistical work
-  left for a future increment once there's enough real usage data to make
-  it meaningful.
+- A single-page shell: a left rail lists every run (goal, verdict,
+  relative time, live-updated every 5s) and stays on screen while the
+  main panel swaps between three views, navigated client-side with no
+  full page reload:
+  - **Detail** (`/runs/:traceId`, or `/` for the most recent run) — the
+    Flight Recorder view: goal, verdict, a scrubbable step timeline with
+    play/pause/speed controls, per-step expansion showing raw
+    input/output, and a Coverage panel showing which of the run's
+    harness manifest entries were actually used.
+  - **Harness** (`/runs/:traceId/harness`) — the skills, sub-agents, and
+    MCP servers that run's harness had available, reshaped from the
+    manifest `mcp/` stamps on every run. Always follows whichever run is
+    selected in the rail.
+  - **Analytics** (`/analytics`) — aggregates coverage across every run
+    in the store: which skills/sub-agents/MCP servers are used vs.
+    registered but never touched ("dead weight").
+  Every route above is also a real, direct, no-JS server-rendered page
+  — client-side navigation (via `/app.js`) is progressive enhancement
+  on top of that, not a replacement for it.
 
 ## Building from source
 
