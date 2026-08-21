@@ -89,7 +89,7 @@ const statusSchema = z
 	.describe("Outcome: 'ok' or 'error' ('success'/'failed'/'failure'/'pass' etc. are also accepted)");
 
 // ---------------------------------------------------------------- server
-const server = new McpServer({ name: "trail", version: "0.1.1" });
+const server = new McpServer({ name: "trail", version: "0.2.0" });
 
 server.registerTool(
 	"trail_start_run",
