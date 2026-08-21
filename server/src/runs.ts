@@ -60,7 +60,7 @@ interface StoredRow {
 
 type AttrMap = Record<string, string | number | boolean>;
 
-function toAttributeMap(attributes: { key: string; value: Record<string, unknown> }[] | undefined): AttrMap {
+export function toAttributeMap(attributes: { key: string; value: Record<string, unknown> }[] | undefined): AttrMap {
 	const map: AttrMap = {};
 	for (const attr of attributes ?? []) {
 		const v = attr.value ?? {};
@@ -93,6 +93,23 @@ function toNs(s: string): bigint | null {
 	} catch {
 		return null;
 	}
+}
+
+// Date's valid range is +/-8.64e15ms from the epoch -- outside it, `new Date(ms).toISOString()`
+// throws RangeError. Since these nanosecond timestamps arrive via unauthenticated, unvalidated
+// ingest, an out-of-range value must degrade to "" rather than crash every route that lists runs.
+const MAX_DATE_MS = 8.64e15;
+
+/** Converts a nanosecond timestamp to an ISO string, degrading to "" (never throwing) if it's outside Date's valid range. */
+export function toIsoOrEmpty(ns: bigint): string {
+	const ms = Number(ns / 1_000_000n);
+	if (!Number.isFinite(ms) || Math.abs(ms) > MAX_DATE_MS) return "";
+	return new Date(ms).toISOString();
+}
+
+/** Returns v if it's a string, otherwise undefined -- guards against a non-string attribute value where a string is expected (attributes arrive from unauthenticated, unvalidated ingest, so gen_ai.agent.goal etc. can be any OTLP value type). */
+export function asString(v: unknown): string | undefined {
+	return typeof v === "string" ? v : undefined;
 }
 
 function formatDuration(startNs: string, endNs: string): string {
@@ -190,7 +207,7 @@ export function getRun(db: Database.Database, traceId: string): RunView | null {
 
 		steps.push({
 			type: inferStepType(parsed.attrs),
-			title: (parsed.attrs["gen_ai.tool.name"] as string | undefined) ?? row.name,
+			title: asString(parsed.attrs["gen_ai.tool.name"]) ?? row.name,
 			status: parsed.errorCode === 2 ? "err" : "ok",
 			start: Number(startNs - rootStartNs) / 1e9,
 			dur: Number(endNs - startNs) / 1e9,
@@ -204,8 +221,8 @@ export function getRun(db: Database.Database, traceId: string): RunView | null {
 
 	return {
 		traceId,
-		goal: (root.attrs["gen_ai.agent.goal"] as string | undefined) ?? rootRow.name,
-		agent: (root.attrs["gen_ai.agent.name"] as string | undefined) ?? "unknown",
+		goal: asString(root.attrs["gen_ai.agent.goal"]) ?? rootRow.name,
+		agent: asString(root.attrs["gen_ai.agent.name"]) ?? "unknown",
 		verdict,
 		score,
 		narrative,
@@ -229,10 +246,10 @@ export function listRuns(db: Database.Database, limit: number): RunSummary[] {
 		if (startNs === null || endNs === null) continue; // malformed timestamp; drop this run from the list rather than crash
 		summaries.push({
 			traceId: row.traceId,
-			goal: (parsed.attrs["gen_ai.agent.goal"] as string | undefined) ?? row.name,
+			goal: asString(parsed.attrs["gen_ai.agent.goal"]) ?? row.name,
 			verdict: (parsed.attrs["gen_ai.agent.verdict"] as Verdict | undefined) ?? "unjudged",
 			dur: formatDuration(row.startTimeUnixNano, row.endTimeUnixNano),
-			startedAt: new Date(Number(startNs / 1_000_000n)).toISOString(),
+			startedAt: toIsoOrEmpty(startNs),
 		});
 	}
 	return summaries;

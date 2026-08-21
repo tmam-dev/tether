@@ -161,6 +161,14 @@ describe("GET /", () => {
 		});
 	});
 
+	test("links to the harness page from the nav", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/`);
+			const text = await res.text();
+			assert.match(text, /href="\/harness"/);
+		});
+	});
+
 	test("lists the run after a POST /traces, linking to its detail page", async () => {
 		await withServer(async ({ port }) => {
 			await fetch(`http://127.0.0.1:${port}/traces`, {
@@ -244,6 +252,89 @@ describe("GET /runs/:traceId", () => {
 		await withServer(async ({ port }) => {
 			const res = await fetch(`http://127.0.0.1:${port}/runs/%`);
 			assert.equal(res.status, 400);
+		});
+	});
+
+	test("links to the harness page from the topbar", async () => {
+		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(otlpPayload()),
+			});
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}`);
+			const text = await res.text();
+			assert.match(text, /href="\/harness"/);
+		});
+	});
+});
+
+describe("GET /harness", () => {
+	test("shows an empty-state page before any ingestion", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/harness`);
+			assert.equal(res.status, 200);
+			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+			const text = await res.text();
+			assert.match(text, /No runs yet/);
+		});
+	});
+
+	function tracePayload(traceId, name, startNs) {
+		return {
+			resourceSpans: [
+				{
+					resource: { attributes: [] },
+					scopeSpans: [
+						{
+							scope: { name: "test-scope", version: "0.1.0" },
+							spans: [
+								{
+									traceId,
+									spanId: "b".repeat(16),
+									name,
+									kind: 1,
+									startTimeUnixNano: startNs,
+									endTimeUnixNano: String(Number(startNs) + 1000000000),
+									attributes: [],
+									events: [],
+									status: { code: 1 },
+								},
+							],
+						},
+					],
+				},
+			],
+		};
+	}
+
+	test("defaults to the most recent run, and ?run= selects an older one", async () => {
+		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(tracePayload("c".repeat(32), "older-run", "1000000000")),
+			});
+			await fetch(`http://127.0.0.1:${port}/traces`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(tracePayload("d".repeat(32), "newer-run", "5000000000")),
+			});
+
+			const defaultRes = await fetch(`http://127.0.0.1:${port}/harness`);
+			assert.equal(defaultRes.status, 200);
+			assert.equal(defaultRes.headers.get("content-type"), "text/html; charset=utf-8");
+			const defaultText = await defaultRes.text();
+			// Both runs' goals legitimately appear in the picker's <option> list -- the
+			// distinguishing check is which one the "as of" line (the current view) names.
+			assert.match(defaultText, /Harness as of: <strong>newer-run<\/strong>/);
+			assert.doesNotMatch(defaultText, /Harness as of: <strong>older-run<\/strong>/);
+
+			const olderRes = await fetch(`http://127.0.0.1:${port}/harness?run=${"c".repeat(32)}`);
+			assert.equal(olderRes.status, 200);
+			const olderText = await olderRes.text();
+			assert.match(olderText, /Harness as of: <strong>older-run<\/strong>/);
+			assert.doesNotMatch(olderText, /Harness as of: <strong>newer-run<\/strong>/);
 		});
 	});
 });

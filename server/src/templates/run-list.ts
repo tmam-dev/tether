@@ -33,8 +33,10 @@ export function renderRunListPage(runs: RunSummary[]): string {
 	td { padding:10px; border-bottom:1px solid #E6E3DB; }
 	a { color:#0B7C87; text-decoration:none; }
 	a:hover { text-decoration:underline; }
+	.nav { font-size:12px; color:#8A8F97; margin-bottom:10px; }
 </style>
 <div class="wrap">
+	<div class="nav"><a href="/">Runs</a> · <a href="/harness">Harness</a></div>
 	<h1>Tether — Runs</h1>
 	${empty}
 	${runs.length ? `<table><thead><tr><th>Goal</th><th>Verdict</th><th>Duration</th><th>Started</th></tr></thead><tbody>${rows}</tbody></table>` : ""}

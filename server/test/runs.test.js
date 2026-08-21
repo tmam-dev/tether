@@ -268,6 +268,37 @@ describe("malformed nanosecond timestamps never throw (finding 5)", () => {
 			rmSync(join(dbPath, ".."), { recursive: true, force: true });
 		}
 	});
+
+	test("falls back to the root span's name (not a crash) when gen_ai.agent.goal is a non-string attribute value", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			const raw = {
+				traceId: "t7",
+				spanId: "r7",
+				name: "fallback-name",
+				startTimeUnixNano: "1000000000000",
+				endTimeUnixNano: "1001000000000",
+				attributes: [{ key: "gen_ai.agent.goal", value: { intValue: "42" } }],
+				events: [],
+				status: { code: 1 },
+			};
+			insertSpan(db, {
+				traceId: "t7",
+				spanId: "r7",
+				parentSpanId: null,
+				name: "fallback-name",
+				startTimeUnixNano: "1000000000000",
+				endTimeUnixNano: "1001000000000",
+				raw: JSON.stringify(raw),
+			});
+			const run = getRun(db, "t7");
+			assert.equal(run.goal, "fallback-name");
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
 });
 
 describe("listRuns", () => {
@@ -299,6 +330,51 @@ describe("listRuns", () => {
 			const capped = listRuns(db, 1);
 			assert.equal(capped.length, 1);
 			assert.equal(capped[0].traceId, "newer");
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("degrades to an empty startedAt (not a crash) when the timestamp is outside Date's valid range", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "huge", spanId: "r1", goal: "g", agent: "a", startNs: "99999999999999999999999", endNs: "99999999999999999999999" }));
+			const runs = listRuns(db, 10);
+			assert.equal(runs.length, 1);
+			assert.equal(runs[0].startedAt, "");
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("falls back to the span name (not a crash) when gen_ai.agent.goal is a non-string attribute value", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			const raw = {
+				traceId: "t",
+				spanId: "r1",
+				name: "fallback-name",
+				startTimeUnixNano: "1000000000000",
+				endTimeUnixNano: "1001000000000",
+				attributes: [{ key: "gen_ai.agent.goal", value: { intValue: "42" } }],
+				events: [],
+				status: { code: 1 },
+			};
+			insertSpan(db, {
+				traceId: "t",
+				spanId: "r1",
+				parentSpanId: null,
+				name: "fallback-name",
+				startTimeUnixNano: "1000000000000",
+				endTimeUnixNano: "1001000000000",
+				raw: JSON.stringify(raw),
+			});
+			const runs = listRuns(db, 10);
+			assert.equal(runs[0].goal, "fallback-name");
 		} finally {
 			db.close();
 			rmSync(join(dbPath, ".."), { recursive: true, force: true });

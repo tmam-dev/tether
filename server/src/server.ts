@@ -9,8 +9,10 @@ import { createServer, IncomingMessage, Server } from "node:http";
 import type Database from "better-sqlite3";
 import { insertSpan } from "./db.js";
 import { getRun, listRuns } from "./runs.js";
+import { getHarnessView } from "./harness.js";
 import { renderFlightRecorderPage } from "./templates/flight-recorder.js";
 import { renderRunListPage } from "./templates/run-list.js";
+import { renderHarnessPage } from "./templates/harness.js";
 
 interface OtlpSpan {
 	traceId: string;
@@ -99,6 +101,21 @@ export function createTetherServer(db: Database.Database): Server {
 					return;
 				}
 				const page = renderFlightRecorderPage(run);
+				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+				res.end(page);
+			} catch (err) {
+				res.writeHead(500, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ ok: false, error: (err as Error).message }));
+			}
+			return;
+		}
+
+		if (req.method === "GET" && pathname === "/harness") {
+			try {
+				const query = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+				const traceId = query.get("run") ?? undefined;
+				const view = getHarnessView(db, traceId);
+				const page = renderHarnessPage(view, listRuns(db, 50));
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 				res.end(page);
 			} catch (err) {

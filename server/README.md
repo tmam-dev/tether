@@ -37,6 +37,10 @@ claude mcp add trail -- npx -y trailai-mcp
   from a design prototype, cut down to exactly what's captured today — no
   pinned criteria, sub-goals, guardrail/eval signals, diffs, or context-window
   inspector, since none of that data exists yet.
+- `GET /harness` (optionally `?run=<traceId>`) — the harness anatomy page: the
+  skills, sub-agents, and MCP servers a run's harness had available, reshaped
+  from the manifest `mcp/` stamps on every run. Defaults to the most recent
+  run; use the picker (or the query param) to see an older run's snapshot.
 
 ## Building from source
 
