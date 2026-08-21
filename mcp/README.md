@@ -119,14 +119,18 @@ Add an instruction to your agent's project rules (e.g. `CLAUDE.md` /
   agent-declared status as untrusted, self-reported claims, weighed against
   the run's automatically-recorded step and error counts — sent as a
   separate, trusted message the judge is told to trust over the claims.
-- `trail_start_run` reads `.claude/skills/*/SKILL.md` frontmatter (`name`,
-  `description`) from `TRAIL_PROJECT_ROOT` (default: process cwd) and
-  attaches it as a `gen_ai.agent.harness_manifest` JSON attribute on the
-  root span `trail_finish_run` emits — a snapshot of what skills the
-  harness had available at that run's start, scoped to the project's own
-  `.claude/skills/` directory only (not user-level `~/.claude/skills/` or
-  plugin-provided skills). A missing `.claude/skills` directory or an
-  unparseable `SKILL.md` is skipped silently; this never blocks or errors
-  the run. Descriptions are truncated to 300 characters and the manifest
-  caps out at 200 skills, to keep this attribute well within the server's
-  request size limit.
+- `trail_start_run` captures a harness manifest and attaches it as a
+  `gen_ai.agent.harness_manifest` JSON attribute on the root span
+  `trail_finish_run` emits — a snapshot of what the harness had available
+  at that run's start. It reads: skills from the project's own
+  `.claude/skills/*/SKILL.md` and the developer's user-level
+  `~/.claude/skills/*/SKILL.md` (each tagged with its `source`); sub-agents
+  from `.claude/agents/*.md` (`name`, `description`, `tools`); and MCP
+  server **names only** from the project's `.mcp.json` and
+  `~/.claude.json`'s per-project config — never the server's `command`,
+  `args`, or `env`, since MCP server configs routinely embed secrets there.
+  Every source degrades silently on a missing directory/file or malformed
+  content; this never blocks or errors the run. Each category is capped at
+  50 entries with descriptions truncated to 300 characters, so the combined
+  attribute stays well within the server's request size limit even with
+  all four categories populated.

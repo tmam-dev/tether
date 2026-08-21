@@ -422,11 +422,30 @@ describe("buildHarnessManifest", () => {
 		try {
 			writeSkill(rootDir, "project-skill", "---\nname: project-skill\ndescription: Project skill.\n---\n");
 			writeSkill(homeDir, "user-skill", "---\nname: user-skill\ndescription: User skill.\n---\n");
-			const manifest = buildHarnessManifest(rootDir, homeDir);
-			assert.equal(manifest.schemaVersion, 1);
+			const manifest = buildHarnessManifest(rootDir, homeDir, join(rootDir, "nonexistent-claude.json"));
+			assert.equal(manifest.schemaVersion, 2);
 			const byName = Object.fromEntries(manifest.skills.map((s) => [s.name, s]));
 			assert.deepEqual(byName["project-skill"], { name: "project-skill", description: "Project skill.", source: "project" });
 			assert.deepEqual(byName["user-skill"], { name: "user-skill", description: "User skill.", source: "user" });
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+			rmSync(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	test("includes sub-agents and MCP servers, with schemaVersion 2", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		const homeDir = makeTempDir("trail-manifest-home-test-");
+		const claudeJsonPath = join(rootDir, "nonexistent-claude.json");
+		try {
+			writeAgent(rootDir, "reviewer", "---\nname: reviewer\ndescription: Reviews code.\ntools: Read, Grep\n---\n");
+			writeFileSync(join(rootDir, ".mcp.json"), JSON.stringify({ mcpServers: { trail: {} } }));
+
+			const manifest = buildHarnessManifest(rootDir, homeDir, claudeJsonPath);
+
+			assert.equal(manifest.schemaVersion, 2);
+			assert.deepEqual(manifest.subAgents, [{ name: "reviewer", description: "Reviews code.", tools: ["Read", "Grep"] }]);
+			assert.deepEqual(manifest.mcpServers, [{ name: "trail" }]);
 		} finally {
 			rmSync(rootDir, { recursive: true, force: true });
 			rmSync(homeDir, { recursive: true, force: true });

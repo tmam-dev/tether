@@ -25,8 +25,10 @@ export interface McpServerEntry {
 }
 
 export interface HarnessManifest {
-	schemaVersion: 1;
+	schemaVersion: 2;
 	skills: SkillEntry[];
+	subAgents: SubAgentEntry[];
+	mcpServers: McpServerEntry[];
 }
 
 const FRONTMATTER_DELIMITER = "---";
@@ -204,9 +206,15 @@ export function discoverMcpServers(rootDir: string, claudeJsonPath: string = joi
 	return uniqueNames.slice(0, MAX_MCP_SERVERS).map((name) => ({ name }));
 }
 
-export function buildHarnessManifest(rootDir: string, homeDir: string = homedir()): HarnessManifest {
+export function buildHarnessManifest(
+	rootDir: string,
+	homeDir: string = homedir(),
+	claudeJsonPath: string = join(homedir(), ".claude.json"),
+): HarnessManifest {
 	return {
-		schemaVersion: 1,
+		schemaVersion: 2,
 		skills: [...discoverSkills(rootDir), ...discoverUserSkills(homeDir)],
+		subAgents: discoverSubAgents(rootDir),
+		mcpServers: discoverMcpServers(rootDir, claudeJsonPath),
 	};
 }
