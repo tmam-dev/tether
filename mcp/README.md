@@ -78,9 +78,9 @@ Environment variables:
 
 | Var                | Required | Meaning                                     |
 | ------------------ | -------- | ------------------------------------------- |
-| `TRAIL_URL`        | yes      | Trail SDK base URL, ends in `/api/sdk/v1`   |
-| `TRAIL_PUBLIC_KEY` | yes      | From Settings → API Keys                    |
-| `TRAIL_SECRET_KEY` | yes      | From Settings → API Keys                    |
+| `TRAIL_URL`        | no       | Trail SDK base URL. Defaults to `http://localhost:4319` (a local Tether instance); set to your Cloud URL (ends in `/api/sdk/v1`) to use Trail Cloud instead |
+| `TRAIL_PUBLIC_KEY` | no       | From Settings → API Keys. Required for Trail Cloud, omit entirely for a local Tether instance (no auth) |
+| `TRAIL_SECRET_KEY` | no       | From Settings → API Keys. Required for Trail Cloud, omit entirely for a local Tether instance (no auth) |
 | `TRAIL_APP`        | no       | Service/agent name in the UI (`coding-agent`) |
 | `TRAIL_ENV`        | no       | Environment tag (`default`)                 |
 | `TRAIL_PROJECT_ROOT` | no   | Project root to discover the harness manifest from (skills, sub-agents, .mcp.json — default: process cwd) |
@@ -134,3 +134,9 @@ Add an instruction to your agent's project rules (e.g. `CLAUDE.md` /
   50 entries with descriptions truncated to 300 characters, so the combined
   attribute stays well within the server's request size limit even with
   all four categories populated.
+- With no env vars set at all, `trail_start_run`/`trail_finish_run`/etc. point at
+  `http://localhost:4319` with no auth headers — the default for a local,
+  self-hosted Tether instance (see `server/`). Set `TRAIL_URL` +
+  `TRAIL_PUBLIC_KEY` + `TRAIL_SECRET_KEY` together to use Trail Cloud instead;
+  existing Cloud configurations that already set all three continue to work
+  exactly as before.

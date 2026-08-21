@@ -24,19 +24,12 @@ import { buildHarnessManifest, HarnessManifest } from "./manifest.js";
 import { judgeGoalAttainment, JudgeConfig, Verdict } from "./judge.js";
 
 // ---------------------------------------------------------------- config
-function requireEnv(name: string): string {
-	const v = process.env[name];
-	if (!v) {
-		console.error(`trail-mcp: missing required env var ${name}`);
-		process.exit(1);
-	}
-	return v;
-}
+const DEFAULT_LOCAL_URL = "http://localhost:4319";
 
 const cfg: TrailConfig = {
-	url: requireEnv("TRAIL_URL"),
-	publicKey: requireEnv("TRAIL_PUBLIC_KEY"),
-	secretKey: requireEnv("TRAIL_SECRET_KEY"),
+	url: process.env.TRAIL_URL ?? DEFAULT_LOCAL_URL,
+	publicKey: process.env.TRAIL_PUBLIC_KEY,
+	secretKey: process.env.TRAIL_SECRET_KEY,
 	environment: process.env.TRAIL_ENV ?? "default",
 	serviceName: process.env.TRAIL_APP ?? "coding-agent",
 };

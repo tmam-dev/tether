@@ -11,9 +11,9 @@
 import { randomBytes } from "node:crypto";
 
 export interface TrailConfig {
-	url: string;        // e.g. https://your-server/api/sdk/v1
-	publicKey: string;
-	secretKey: string;
+	url: string;        // e.g. https://your-server/api/sdk/v1, or http://localhost:4319 for local mode
+	publicKey?: string;
+	secretKey?: string;
 	environment: string;
 	serviceName: string;
 }
@@ -126,8 +126,8 @@ export async function sendSpan(cfg: TrailConfig, span: SpanInput): Promise<void>
 		headers: {
 			"Content-Type": "application/json",
 			"User-Agent": "trail-mcp/0.1.0",
-			"X-Public-Key": cfg.publicKey,
-			"X-Secret-Key": cfg.secretKey,
+			...(cfg.publicKey ? { "X-Public-Key": cfg.publicKey } : {}),
+			...(cfg.secretKey ? { "X-Secret-Key": cfg.secretKey } : {}),
 		},
 		body: JSON.stringify(buildPayload(cfg, span)),
 	});
