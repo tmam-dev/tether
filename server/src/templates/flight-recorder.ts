@@ -279,7 +279,7 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
   function fmtT(s){ s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
   function fmtCost(c){ return c==null ? '' : '$'+c.toFixed(c<1?3:2); }
   function fmtTok(t){ return t==null ? '' : (t>=1000 ? (t/1000).toFixed(1).replace(/\.0$/,'')+'k' : String(t)); }
-  function escapeHtml(s){ return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function escapeHtml(s){ return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
   function ring(pct, color) {
     const r=18, C=2*Math.PI*r, on=pct/100*C;
@@ -290,7 +290,7 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
   }
 
   function renderMission() {
-    const r = RUN, v = VERDICT[r.verdict];
+    const r = RUN, v = VERDICT[r.verdict] || VERDICT.unjudged;
     const m = $('mission');
     m.style.setProperty('--vc', v.color); m.style.setProperty('--vc-wash', v.wash); m.style.setProperty('--vc-line', v.line);
     m.innerHTML =
@@ -302,7 +302,7 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
       + '<div class="verdict">'
         + '<div class="verdict-badge"><svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'+v.glyph+'</svg>'
           + '<div class="vt"><span class="lab">Verdict</span><span class="val">'+v.label+'</span></div></div>'
-        + (r.verdict!=='unjudged' ? '<div class="pcredit">'+ring(Math.round(r.score*100), v.color)
+        + (r.verdict!=='unjudged' && r.score!=null ? '<div class="pcredit">'+ring(Math.round(r.score*100), v.color)
             + '<div class="pc-side"><div class="conf-row"><span>Goal completion</span><span>'+Math.round(r.score*100)+'%</span></div></div></div>' : '')
       + '</div>';
   }
@@ -391,9 +391,9 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
       insp.innerHTML = '<div class="insp-section"><div class="insp-empty">No verdict — no goal-attainment judge was configured for this run (set TRAIL_JUDGE_PROVIDER/TRAIL_JUDGE_API_KEY to enable one).</div></div>';
       return;
     }
-    const v = VERDICT[r.verdict];
+    const v = VERDICT[r.verdict] || VERDICT.unjudged;
     insp.style.setProperty('--vc', v.color);
-    insp.innerHTML = '<div class="insp-section"><h3>LLM judge</h3><div class="judge-quote">'+r.narrative+'</div></div>';
+    insp.innerHTML = '<div class="insp-section"><h3>LLM judge</h3><div class="judge-quote">'+escapeHtml(r.narrative||'')+'</div></div>';
   }
 
   function renderStepIO(s, i) {
@@ -458,5 +458,14 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
 `;
 
 export function renderFlightRecorderPage(run: RunView): string {
-	return TEMPLATE.replace("__RUN_JSON__", JSON.stringify(run));
+	// Escape `<` so a field like `</script><img src=x onerror=...>` can't break out of the
+	// inline <script> block, and escape the JS line-terminator characters (valid in JSON
+	// strings, illegal inside a JS string literal in older engines). Use a function replacer
+	// (not a string one) so a goal containing "$&" / "$'" etc. can't trigger String.replace's
+	// special replacement-pattern handling and corrupt the surrounding template.
+	const json = JSON.stringify(run)
+		.replace(/</g, "\\u003c")
+		.replace(/\u2028/g, "\\u2028")
+		.replace(/\u2029/g, "\\u2029");
+	return TEMPLATE.replace("__RUN_JSON__", () => json);
 }

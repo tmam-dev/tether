@@ -219,6 +219,57 @@ describe("getRun", () => {
 	});
 });
 
+describe("malformed nanosecond timestamps never throw (finding 5)", () => {
+	test("getRun does not throw when the root span's startTimeUnixNano is malformed, and still returns a RunView", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "bad-root", spanId: "rbad1", goal: "g", agent: "a", startNs: "not-a-number", endNs: "1001000000000" }));
+			let run;
+			assert.doesNotThrow(() => { run = getRun(db, "bad-root"); });
+			assert.notEqual(run, null);
+			assert.equal(run.goal, "g");
+			assert.equal(run.totals.dur, "0s");
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("getRun skips a step whose own timestamp is malformed instead of crashing the whole run", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "bad-step", spanId: "rbad2", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1100000000000" }));
+			insertSpan(db, stepSpan({ traceId: "bad-step", spanId: "sbad", parentSpanId: "rbad2", name: "broken step", startNs: "not-a-number", endNs: "1005000000000", toolName: "broken tool" }));
+			insertSpan(db, stepSpan({ traceId: "bad-step", spanId: "sgood", parentSpanId: "rbad2", name: "good step", startNs: "1010000000000", endNs: "1011000000000", toolName: "good tool" }));
+			let run;
+			assert.doesNotThrow(() => { run = getRun(db, "bad-step"); });
+			assert.equal(run.steps.length, 1);
+			assert.equal(run.steps[0].title, "good tool");
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("listRuns skips a run whose startTimeUnixNano is malformed instead of crashing the whole list", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "bad-list", spanId: "rbad3", goal: "bad run", agent: "a", startNs: "not-a-number", endNs: "1001000000000" }));
+			insertSpan(db, rootSpan({ traceId: "good-list", spanId: "rgood3", goal: "good run", agent: "a", startNs: "1000000000000", endNs: "1001000000000" }));
+			let runs;
+			assert.doesNotThrow(() => { runs = listRuns(db, 10); });
+			assert.equal(runs.length, 1);
+			assert.equal(runs[0].traceId, "good-list");
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+});
+
 describe("listRuns", () => {
 	test("returns an empty array when there are no runs", () => {
 		const dbPath = makeTempDbPath();

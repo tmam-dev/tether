@@ -86,8 +86,20 @@ function inferStepType(attrs: AttrMap): StepType {
 	return "reason";
 }
 
+/** Parses a nanosecond-timestamp string to a bigint, returning null (never throwing) on malformed input. */
+function toNs(s: string): bigint | null {
+	try {
+		return BigInt(s);
+	} catch {
+		return null;
+	}
+}
+
 function formatDuration(startNs: string, endNs: string): string {
-	const seconds = Math.max(0, Math.round((Number(BigInt(endNs) - BigInt(startNs))) / 1e9));
+	const start = toNs(startNs);
+	const end = toNs(endNs);
+	if (start === null || end === null) return "0s";
+	const seconds = Math.max(0, Math.round(Number(end - start) / 1e9));
 	if (seconds < 60) return seconds + "s";
 	return Math.floor(seconds / 60) + "m " + String(seconds % 60).padStart(2, "0") + "s";
 }
@@ -157,7 +169,9 @@ export function getRun(db: Database.Database, traceId: string): RunView | null {
 	const narrative = typeof root.attrs["gen_ai.agent.verdict_narrative"] === "string" ? (root.attrs["gen_ai.agent.verdict_narrative"] as string) : null;
 
 	const stepRows = rows.filter((r) => r.spanId !== rootRow.spanId);
-	const rootStartNs = BigInt(rootRow.startTimeUnixNano);
+	// An unparseable root-span timestamp falls back to 0n rather than throwing -- the run still
+	// renders (with a defensible-but-arbitrary time origin) instead of a 500 for every request.
+	const rootStartNs = toNs(rootRow.startTimeUnixNano) ?? 0n;
 
 	const steps: StepView[] = [];
 	let totalCost: number | null = null;
@@ -166,6 +180,9 @@ export function getRun(db: Database.Database, traceId: string): RunView | null {
 	for (const row of stepRows) {
 		const parsed = parseRaw(row.raw);
 		if (!parsed) continue;
+		const startNs = toNs(row.startTimeUnixNano);
+		const endNs = toNs(row.endTimeUnixNano);
+		if (startNs === null || endNs === null) continue; // malformed step timestamp; drop the step, not the whole run
 		const cost = typeof parsed.attrs["gen_ai.usage.cost"] === "number" ? (parsed.attrs["gen_ai.usage.cost"] as number) : null;
 		const tok = typeof parsed.attrs["gen_ai.usage.total_tokens"] === "number" ? (parsed.attrs["gen_ai.usage.total_tokens"] as number) : null;
 		if (cost !== null) totalCost = (totalCost ?? 0) + cost;
@@ -175,8 +192,8 @@ export function getRun(db: Database.Database, traceId: string): RunView | null {
 			type: inferStepType(parsed.attrs),
 			title: (parsed.attrs["gen_ai.tool.name"] as string | undefined) ?? row.name,
 			status: parsed.errorCode === 2 ? "err" : "ok",
-			start: Number(BigInt(row.startTimeUnixNano) - rootStartNs) / 1e9,
-			dur: Number(BigInt(row.endTimeUnixNano) - BigInt(row.startTimeUnixNano)) / 1e9,
+			start: Number(startNs - rootStartNs) / 1e9,
+			dur: Number(endNs - startNs) / 1e9,
 			cost,
 			tok,
 			io: buildStepIo(parsed.events),
@@ -207,12 +224,15 @@ export function listRuns(db: Database.Database, limit: number): RunSummary[] {
 	for (const row of rows) {
 		const parsed = parseRaw(row.raw);
 		if (!parsed) continue;
+		const startNs = toNs(row.startTimeUnixNano);
+		const endNs = toNs(row.endTimeUnixNano);
+		if (startNs === null || endNs === null) continue; // malformed timestamp; drop this run from the list rather than crash
 		summaries.push({
 			traceId: row.traceId,
 			goal: (parsed.attrs["gen_ai.agent.goal"] as string | undefined) ?? row.name,
 			verdict: (parsed.attrs["gen_ai.agent.verdict"] as Verdict | undefined) ?? "unjudged",
 			dur: formatDuration(row.startTimeUnixNano, row.endTimeUnixNano),
-			startedAt: new Date(Number(BigInt(row.startTimeUnixNano) / 1_000_000n)).toISOString(),
+			startedAt: new Date(Number(startNs / 1_000_000n)).toISOString(),
 		});
 	}
 	return summaries;
