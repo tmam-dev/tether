@@ -96,8 +96,12 @@ export function createTetherServer(db: Database.Database): Server {
 		}
 
 		if (req.method === "GET" && pathname === "/app.js") {
-			res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-			res.end(APP_JS);
+			try {
+				res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+				res.end(APP_JS);
+			} catch (err) {
+				sendError(res, 500, (err as Error).message);
+			}
 			return;
 		}
 
