@@ -71,7 +71,7 @@ export function createTetherServer(db: Database.Database): Server {
 		if (req.method === "GET" && req.url === "/") {
 			try {
 				const page = renderRunListPage(listRuns(db, 50));
-				res.writeHead(200, { "Content-Type": "text/html" });
+				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 				res.end(page);
 			} catch (err) {
 				res.writeHead(500, { "Content-Type": "application/json" });
@@ -90,7 +90,7 @@ export function createTetherServer(db: Database.Database): Server {
 					return;
 				}
 				const page = renderFlightRecorderPage(run);
-				res.writeHead(200, { "Content-Type": "text/html" });
+				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 				res.end(page);
 			} catch (err) {
 				res.writeHead(500, { "Content-Type": "application/json" });

@@ -155,6 +155,7 @@ describe("GET /", () => {
 		await withServer(async ({ port }) => {
 			const res = await fetch(`http://127.0.0.1:${port}/`);
 			assert.equal(res.status, 200);
+			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
 			const text = await res.text();
 			assert.equal(text.includes("/runs/"), false);
 		});
@@ -202,6 +203,7 @@ describe("GET /runs/:traceId", () => {
 			});
 			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}`);
 			assert.equal(res.status, 200);
+			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
 			const text = await res.text();
 			assert.match(text, /Flight Recorder/);
 			assert.match(text, /test-span/);
