@@ -309,3 +309,143 @@ function mountDetailPanel(runData: RunData): () => void {
 		document.removeEventListener("keydown", onDocumentKeydown);
 	};
 }
+
+// ---------- Router ----------
+
+interface ShellState {
+	view: "detail" | "harness" | "analytics";
+	traceId: string | null;
+}
+
+// `declare global` requires the file to be a module (i.e. have a top-level import/export), which
+// this file deliberately has none of so it compiles as a classic script. A plain type alias plus
+// a cast at the one read site below achieves the same typing without that requirement.
+type WindowWithInitialState = Window & { __TETHER_INITIAL__?: ShellState };
+
+let currentUnmount: (() => void) | null = null;
+let currentState: ShellState = { view: "detail", traceId: null };
+
+function parsePathname(pathname: string): ShellState | null {
+	if (pathname === "/analytics") return { view: "analytics", traceId: null };
+	const harnessMatch = pathname.match(/^\/runs\/([^/]+)\/harness$/);
+	if (harnessMatch) return { view: "harness", traceId: decodeURIComponent(harnessMatch[1]) };
+	const detailMatch = pathname.match(/^\/runs\/([^/]+)$/);
+	if (detailMatch) return { view: "detail", traceId: decodeURIComponent(detailMatch[1]) };
+	return null;
+}
+
+function fragmentUrlFor(state: ShellState): string {
+	if (state.view === "analytics") return "/fragments/analytics";
+	if (state.view === "harness") return `/fragments/harness/${encodeURIComponent(state.traceId as string)}`;
+	return `/fragments/detail/${encodeURIComponent(state.traceId as string)}`;
+}
+
+function setTabActive(view: ShellState["view"]): void {
+	document.querySelectorAll(".tabbar .tab").forEach((el) => {
+		el.classList.toggle("tab-active", el.getAttribute("data-nav") === view);
+	});
+}
+
+function setRailActive(traceId: string | null): void {
+	document.querySelectorAll("#rail a.rail-row").forEach((el) => {
+		el.classList.toggle("rail-row-active", el.getAttribute("data-trace-id") === traceId);
+	});
+}
+
+function mountRunDataIfPresent(): void {
+	const dataEl = document.getElementById("run-data");
+	if (!dataEl) return;
+	// RunData is the type mountDetailPanel (Task 6, same module) already declares.
+	const runData = JSON.parse(dataEl.textContent || "null") as RunData | null;
+	if (!runData) return;
+	currentUnmount = mountDetailPanel(runData);
+	document.title = `Tether — ${runData.goal}`;
+}
+
+function renderRetry(retry: () => void): void {
+	const content = $("content");
+	content.innerHTML = `<p class="empty">Couldn't load this view. <button id="retryNav" type="button">Retry</button></p>`;
+	document.getElementById("retryNav")?.addEventListener("click", retry);
+}
+
+async function navigateTo(pathname: string, push: boolean): Promise<void> {
+	const target = parsePathname(pathname);
+	if (!target) { window.location.href = pathname; return; }
+
+	let html: string;
+	let status: number;
+	try {
+		const res = await window.fetch(fragmentUrlFor(target));
+		status = res.status;
+		html = await res.text();
+	} catch {
+		renderRetry(() => navigateTo(pathname, push));
+		return;
+	}
+	if (status !== 200 && status !== 404) {
+		renderRetry(() => navigateTo(pathname, push));
+		return;
+	}
+
+	if (currentUnmount) { currentUnmount(); currentUnmount = null; }
+	$("content").innerHTML = html;
+	currentState = target;
+
+	if (status === 404) {
+		document.title = "Tether — Run not found";
+	} else if (target.view === "detail") {
+		mountRunDataIfPresent();
+	} else if (target.view === "harness") {
+		document.title = "Tether — Harness";
+	} else {
+		document.title = "Tether — Analytics";
+	}
+
+	setTabActive(target.view);
+	setRailActive(target.view === "analytics" ? null : target.traceId);
+	if (push) window.history.pushState(null, "", pathname);
+}
+
+function onRailOrTabClick(e: MouseEvent): void {
+	const targetEl = e.target as Element | null;
+	const anchor = targetEl?.closest("a[data-trace-id], a[data-nav]");
+	if (!anchor) return;
+	if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+	e.preventDefault();
+	navigateTo(new URL((anchor as HTMLAnchorElement).href).pathname, true);
+}
+
+function onPopState(): void {
+	navigateTo(window.location.pathname, false);
+}
+
+function pollRail(): void {
+	const query = currentState.traceId ? `?active=${encodeURIComponent(currentState.traceId)}` : "";
+	window.fetch(`/fragments/rail${query}`)
+		.then((res) => (res.ok ? res.text() : null))
+		.then((html) => { if (html != null) $("rail").innerHTML = html; })
+		.catch(() => {});
+}
+
+function initThemeToggle(): void {
+	document.getElementById("themeBtn")?.addEventListener("click", () => {
+		const root = document.documentElement;
+		const isDark = (root.getAttribute("data-theme") || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
+		root.setAttribute("data-theme", isDark ? "light" : "dark");
+	});
+}
+
+function init(): void {
+	const initial = (window as WindowWithInitialState).__TETHER_INITIAL__;
+	if (initial) currentState = initial;
+
+	document.getElementById("rail")?.addEventListener("click", onRailOrTabClick);
+	document.querySelector<HTMLElement>(".tabbar")?.addEventListener("click", onRailOrTabClick);
+	window.addEventListener("popstate", onPopState);
+	initThemeToggle();
+	window.setInterval(pollRail, 5000);
+
+	if (currentState.view === "detail") mountRunDataIfPresent();
+}
+
+init();

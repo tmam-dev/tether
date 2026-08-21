@@ -25,7 +25,13 @@ function makeRunData(overrides = {}) {
 }
 
 class FakeElement {
-	constructor(id) {
+	// `register`, when given, is a getOrCreate(id) callback from the owning loadApp() call's id
+	// map. Setting innerHTML on a real element makes any id="..." it contains reachable via
+	// document.getElementById; this fake DOM has no real parent/child tree to walk for that, so
+	// instead it scans the assigned HTML for an embedded `<script id="...">...</script>` (the
+	// router's run-data payload is delivered exactly that way) and registers/populates that id
+	// directly, mirroring what a real DOM would do.
+	constructor(id, register) {
 		this.id = id;
 		this._innerHTML = "";
 		this.textContent = "";
@@ -36,8 +42,15 @@ class FakeElement {
 		this._attrs = {};
 		this.children = [];
 		this._listeners = {};
+		this._register = register;
 	}
-	set innerHTML(v) { this._innerHTML = v; }
+	set innerHTML(v) {
+		this._innerHTML = v;
+		const scriptMatch = v.match(/<script[^>]*\sid="([^"]+)"[^>]*>([\s\S]*?)<\/script>/);
+		if (scriptMatch && this._register) {
+			this._register(scriptMatch[1]).textContent = scriptMatch[2];
+		}
+	}
 	get innerHTML() { return this._innerHTML; }
 	setAttribute(n, v) { this._attrs[n] = v; }
 	getAttribute(n) { return this._attrs[n] ?? null; }
@@ -58,7 +71,7 @@ function loadApp() {
 	const src = readFileSync(APP_JS_PATH, "utf-8");
 	const elements = {};
 	function getOrCreate(id) {
-		if (!elements[id]) elements[id] = new FakeElement(id);
+		if (!elements[id]) elements[id] = new FakeElement(id, getOrCreate);
 		return elements[id];
 	}
 	const windowListeners = {};
@@ -72,6 +85,8 @@ function loadApp() {
 		querySelectorAll: () => [],
 		querySelector: () => null,
 	};
+	getOrCreate("content");
+	getOrCreate("rail");
 	const windowStub = {
 		matchMedia: () => ({ matches: false }),
 		requestAnimationFrame: () => 1,
@@ -79,7 +94,7 @@ function loadApp() {
 		addEventListener: (type, fn) => { (windowListeners[type] ??= []).push(fn); },
 		removeEventListener: (type, fn) => { windowListeners[type] = (windowListeners[type] ?? []).filter((f) => f !== fn); },
 		history: { pushState: () => {} },
-		location: { pathname: "/" },
+		location: { pathname: "/", href: "" },
 		setInterval: () => 0,
 		fetch: () => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") }),
 		__TETHER_INITIAL__: undefined,
@@ -87,7 +102,17 @@ function loadApp() {
 	const sandbox = { document: documentStub, window: windowStub, history: windowStub.history, location: windowStub.location, setInterval: windowStub.setInterval, fetch: windowStub.fetch, console };
 	vm.createContext(sandbox);
 	vm.runInContext(src, sandbox, { filename: "app.js" });
-	return { elements, windowListeners, documentListeners, mountDetailPanel: sandbox.mountDetailPanel };
+	// vm contexts are a separate realm: plain objects returned from sandbox code have a
+	// different Object.prototype than this file's, which trips assert.deepEqual's cross-realm
+	// "same structure but not reference-equal" check. Round-tripping through JSON rebuilds the
+	// return value as a plain object of this realm so structural assertions work normally --
+	// the router's ShellState values are plain JSON-safe data, so this changes nothing observable.
+	const rawParsePathname = sandbox.parsePathname;
+	sandbox.parsePathname = (pathname) => {
+		const result = rawParsePathname(pathname);
+		return result === null ? null : JSON.parse(JSON.stringify(result));
+	};
+	return { elements, windowListeners, documentListeners, windowStub, sandbox, mountDetailPanel: sandbox.mountDetailPanel };
 }
 
 describe("mountDetailPanel", () => {
@@ -133,5 +158,76 @@ describe("mountDetailPanel", () => {
 		assert.equal((windowListeners.mousemove ?? []).length, 0);
 		assert.equal((windowListeners.mouseup ?? []).length, 0);
 		assert.equal((documentListeners.keydown ?? []).length, 0);
+	});
+});
+
+describe("router: path parsing and fragment URLs", () => {
+	test("parsePathname recognizes all four route shapes and rejects everything else", () => {
+		const { sandbox } = loadApp();
+		assert.deepEqual(sandbox.parsePathname("/analytics"), { view: "analytics", traceId: null });
+		assert.deepEqual(sandbox.parsePathname("/runs/" + "a".repeat(32)), { view: "detail", traceId: "a".repeat(32) });
+		assert.deepEqual(sandbox.parsePathname("/runs/" + "a".repeat(32) + "/harness"), { view: "harness", traceId: "a".repeat(32) });
+		assert.equal(sandbox.parsePathname("/"), null);
+		assert.equal(sandbox.parsePathname("/something-else"), null);
+	});
+
+	test("fragmentUrlFor maps each ShellState to its matching /fragments/* URL", () => {
+		const { sandbox } = loadApp();
+		assert.equal(sandbox.fragmentUrlFor({ view: "analytics", traceId: null }), "/fragments/analytics");
+		assert.equal(sandbox.fragmentUrlFor({ view: "harness", traceId: "b".repeat(32) }), "/fragments/harness/" + "b".repeat(32));
+		assert.equal(sandbox.fragmentUrlFor({ view: "detail", traceId: "c".repeat(32) }), "/fragments/detail/" + "c".repeat(32));
+	});
+});
+
+describe("router: navigation", () => {
+	test("navigating to a recognized path fetches the right fragment and swaps #content", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		windowStub.fetch = (url) => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("<p>analytics body</p>") });
+		await sandbox.navigateTo("/analytics", true);
+		assert.equal(elements.content.innerHTML, "<p>analytics body</p>");
+	});
+
+	test("navigating to an unrecognized path falls back to a full navigation instead of fetching", async () => {
+		const { windowStub, sandbox } = loadApp();
+		let fetched = false;
+		windowStub.fetch = () => { fetched = true; return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") }); };
+		await sandbox.navigateTo("/some/unknown/path", true);
+		assert.equal(fetched, false);
+		assert.equal(windowStub.location.href, "/some/unknown/path");
+	});
+
+	test("a fragment fetch that resolves 404 renders the not-found body directly, not the generic retry block", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		windowStub.fetch = () => Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('<p class="empty">Run not found.</p>') });
+		await sandbox.navigateTo("/runs/" + "d".repeat(32), true);
+		assert.match(elements.content.innerHTML, /Run not found/);
+		assert.doesNotMatch(elements.content.innerHTML, /Retry/);
+	});
+
+	test("a network failure during navigation renders a retry block", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		windowStub.fetch = () => Promise.reject(new Error("network down"));
+		await sandbox.navigateTo("/analytics", true);
+		assert.match(elements.content.innerHTML, /Retry/);
+	});
+
+	test("navigating away from a mounted detail view unmounts it -- its window listeners are gone before the new panel mounts", async () => {
+		const { elements, windowListeners, windowStub, sandbox } = loadApp();
+		const detailHtml = '<script type="application/json" id="run-data">' + JSON.stringify({ traceId: "e".repeat(32), goal: "g", agent: "a", verdict: "unjudged", score: null, narrative: null, totals: { dur: "1s", cost: null, tokens: null, steps: 0 }, steps: [], coverage: null }) + "</script>";
+		windowStub.fetch = (url) => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(url.includes("/fragments/detail/") ? detailHtml : "<p>analytics body</p>") });
+
+		await sandbox.navigateTo("/runs/" + "e".repeat(32), true);
+		// mountDetailPanel's own initControls() ran for real here, registering its two window
+		// listeners on the same windowListeners object Task 6's unmount test asserts against.
+		assert.equal((windowListeners.mousemove ?? []).length, 1);
+		assert.equal((windowListeners.mouseup ?? []).length, 1);
+
+		await sandbox.navigateTo("/analytics", true);
+		// navigateTo must have called the stored unmount() before swapping #content -- if it
+		// didn't, these listeners would still be registered even though the Detail panel's DOM
+		// (and the run-data it was mounted from) no longer exists.
+		assert.equal((windowListeners.mousemove ?? []).length, 0);
+		assert.equal((windowListeners.mouseup ?? []).length, 0);
+		assert.equal(elements.content.innerHTML, "<p>analytics body</p>");
 	});
 });
