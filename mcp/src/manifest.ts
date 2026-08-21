@@ -20,6 +20,10 @@ export interface SubAgentEntry {
 	tools: string[];
 }
 
+export interface McpServerEntry {
+	name: string;
+}
+
 export interface HarnessManifest {
 	schemaVersion: 1;
 	skills: SkillEntry[];
@@ -35,6 +39,7 @@ const MAX_DESCRIPTION_LENGTH = 300;
 // other span attributes.
 const MAX_SKILLS = 50;
 const MAX_SUB_AGENTS = 50;
+const MAX_MCP_SERVERS = 50;
 
 function parseFrontmatter(content: string): Record<string, string> | null {
 	const lines = content.split("\n");
@@ -156,6 +161,47 @@ export function discoverSubAgents(rootDir: string): SubAgentEntry[] {
 		});
 	}
 	return agents;
+}
+
+function readMcpServerNames(mcpJsonPath: string): string[] {
+	try {
+		const content = readFileSync(mcpJsonPath, "utf-8");
+		const parsed = JSON.parse(content) as { mcpServers?: Record<string, unknown> };
+		if (!parsed.mcpServers || typeof parsed.mcpServers !== "object") return [];
+		return Object.keys(parsed.mcpServers);
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Reads MCP server names (never command/args/env -- those routinely hold
+ * secrets) from two sources: a project's own .mcp.json, and this
+ * developer's ~/.claude.json under projects[rootDir].mcpServers. Both are
+ * optional and either can be absent or malformed without affecting the
+ * other -- each degrades to contributing no names, never throwing.
+ *
+ * claudeJsonPath defaults to the real ~/.claude.json but can be overridden
+ * for tests. Results from both sources are merged and deduplicated by
+ * name, then capped at MAX_MCP_SERVERS.
+ */
+export function discoverMcpServers(rootDir: string, claudeJsonPath: string = join(homedir(), ".claude.json")): McpServerEntry[] {
+	const projectNames = readMcpServerNames(join(rootDir, ".mcp.json"));
+
+	let globalNames: string[] = [];
+	try {
+		const content = readFileSync(claudeJsonPath, "utf-8");
+		const parsed = JSON.parse(content) as { projects?: Record<string, { mcpServers?: Record<string, unknown> }> };
+		const projectEntry = parsed.projects?.[rootDir];
+		if (projectEntry?.mcpServers && typeof projectEntry.mcpServers === "object") {
+			globalNames = Object.keys(projectEntry.mcpServers);
+		}
+	} catch {
+		globalNames = [];
+	}
+
+	const uniqueNames = [...new Set([...projectNames, ...globalNames])];
+	return uniqueNames.slice(0, MAX_MCP_SERVERS).map((name) => ({ name }));
 }
 
 export function buildHarnessManifest(rootDir: string, homeDir: string = homedir()): HarnessManifest {

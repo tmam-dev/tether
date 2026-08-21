@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { discoverSkills, discoverUserSkills, discoverSubAgents, buildHarnessManifest } from "../dist/manifest.js";
+import { discoverSkills, discoverUserSkills, discoverSubAgents, discoverMcpServers, buildHarnessManifest } from "../dist/manifest.js";
 
 function makeTempDir(prefix) {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -292,6 +292,123 @@ describe("discoverSubAgents", () => {
 				writeAgent(rootDir, name, `---\nname: ${name}\ndescription: Agent number ${i}.\n---\n`);
 			}
 			assert.equal(discoverSubAgents(rootDir).length, 50);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("discoverMcpServers", () => {
+	test("returns an empty array when neither source exists", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		const claudeJsonPath = join(rootDir, "nonexistent-claude.json");
+		try {
+			assert.deepEqual(discoverMcpServers(rootDir, claudeJsonPath), []);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("reads server names from a project .mcp.json, never command/args/env", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		const claudeJsonPath = join(rootDir, "nonexistent-claude.json");
+		try {
+			writeFileSync(
+				join(rootDir, ".mcp.json"),
+				JSON.stringify({
+					mcpServers: {
+						trail: { command: "npx", args: ["-y", "trailai-mcp"], env: { TRAIL_SECRET_KEY: "sk-super-secret" } },
+					},
+				}),
+			);
+			const servers = discoverMcpServers(rootDir, claudeJsonPath);
+			assert.deepEqual(servers, [{ name: "trail" }]);
+			assert.equal(JSON.stringify(servers).includes("sk-super-secret"), false);
+			assert.equal(JSON.stringify(servers).includes("npx"), false);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("reads server names from ~/.claude.json's projects[rootDir].mcpServers, never command/args/env", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		const claudeJsonDir = makeTempDir("trail-manifest-claudejson-");
+		const claudeJsonPath = join(claudeJsonDir, ".claude.json");
+		try {
+			writeFileSync(
+				claudeJsonPath,
+				JSON.stringify({
+					projects: {
+						[rootDir]: {
+							mcpServers: {
+								github: { command: "npx", args: ["-y", "github-mcp"], env: { GITHUB_TOKEN: "gh-super-secret" } },
+							},
+						},
+					},
+				}),
+			);
+			const servers = discoverMcpServers(rootDir, claudeJsonPath);
+			assert.deepEqual(servers, [{ name: "github" }]);
+			assert.equal(JSON.stringify(servers).includes("gh-super-secret"), false);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+			rmSync(claudeJsonDir, { recursive: true, force: true });
+		}
+	});
+
+	test("merges and deduplicates server names from both sources", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		const claudeJsonDir = makeTempDir("trail-manifest-claudejson-");
+		const claudeJsonPath = join(claudeJsonDir, ".claude.json");
+		try {
+			writeFileSync(join(rootDir, ".mcp.json"), JSON.stringify({ mcpServers: { trail: {}, shared: {} } }));
+			writeFileSync(
+				claudeJsonPath,
+				JSON.stringify({ projects: { [rootDir]: { mcpServers: { github: {}, shared: {} } } } }),
+			);
+			const servers = discoverMcpServers(rootDir, claudeJsonPath);
+			assert.deepEqual(
+				servers.map((s) => s.name).sort(),
+				["github", "shared", "trail"],
+			);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+			rmSync(claudeJsonDir, { recursive: true, force: true });
+		}
+	});
+
+	test("degrades to an empty array for a malformed .mcp.json", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		const claudeJsonPath = join(rootDir, "nonexistent-claude.json");
+		try {
+			writeFileSync(join(rootDir, ".mcp.json"), "not valid json{{{");
+			assert.deepEqual(discoverMcpServers(rootDir, claudeJsonPath), []);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+		}
+	});
+
+	test("degrades to an empty array when the project has no entry in ~/.claude.json", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		const claudeJsonDir = makeTempDir("trail-manifest-claudejson-");
+		const claudeJsonPath = join(claudeJsonDir, ".claude.json");
+		try {
+			writeFileSync(claudeJsonPath, JSON.stringify({ projects: { "/some/other/project": { mcpServers: { foo: {} } } } }));
+			assert.deepEqual(discoverMcpServers(rootDir, claudeJsonPath), []);
+		} finally {
+			rmSync(rootDir, { recursive: true, force: true });
+			rmSync(claudeJsonDir, { recursive: true, force: true });
+		}
+	});
+
+	test("caps discovered MCP servers at 50", () => {
+		const rootDir = makeTempDir("trail-manifest-test-");
+		const claudeJsonPath = join(rootDir, "nonexistent-claude.json");
+		try {
+			const servers = {};
+			for (let i = 0; i < 70; i++) servers[`server-${String(i).padStart(3, "0")}`] = {};
+			writeFileSync(join(rootDir, ".mcp.json"), JSON.stringify({ mcpServers: servers }));
+			assert.equal(discoverMcpServers(rootDir, claudeJsonPath).length, 50);
 		} finally {
 			rmSync(rootDir, { recursive: true, force: true });
 		}
