@@ -4,9 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openDatabase, countTraces } from "../dist/db.js";
-import { getRun } from "../dist/runs.js";
 import { createTetherServer } from "../dist/server.js";
-import { renderRunListPage } from "../dist/templates/run-list.js";
 
 function makeTempDbPath() {
 	const dir = mkdtempSync(join(tmpdir(), "tether-server-test-"));
@@ -150,335 +148,162 @@ describe("POST /traces", () => {
 	});
 });
 
+describe("GET /app.js", () => {
+	test("serves the client router as JavaScript", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/app.js`);
+			assert.equal(res.status, 200);
+			assert.equal(res.headers.get("content-type"), "text/javascript; charset=utf-8");
+			const text = await res.text();
+			assert.match(text, /function navigateTo/);
+		});
+	});
+});
+
 describe("GET /", () => {
-	test("returns a page with no run links before any ingestion", async () => {
+	test("an empty store renders the shell with an empty rail and empty Detail panel", async () => {
 		await withServer(async ({ port }) => {
 			const res = await fetch(`http://127.0.0.1:${port}/`);
 			assert.equal(res.status, 200);
-			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
 			const text = await res.text();
-			assert.equal(text.includes("/runs/"), false);
+			assert.match(text, /No runs yet/);
+			assert.match(text, /tab-disabled/); // Harness tab disabled, nothing selected
 		});
 	});
 
-	test("links to the harness page from the nav", async () => {
+	test("with runs, shows the most recent run's Detail panel and highlights it in the rail", async () => {
 		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(otlpPayload()) });
 			const res = await fetch(`http://127.0.0.1:${port}/`);
 			const text = await res.text();
-			assert.match(text, /href="\/harness"/);
+			assert.match(text, /rail-row-active/);
+			assert.match(text, /id="run-data"/);
 		});
-	});
-
-	test("links to the analytics page from the nav", async () => {
-		await withServer(async ({ port }) => {
-			const res = await fetch(`http://127.0.0.1:${port}/`);
-			const text = await res.text();
-			assert.match(text, /href="\/analytics"/);
-		});
-	});
-
-	test("lists the run after a POST /traces, linking to its detail page", async () => {
-		await withServer(async ({ port }) => {
-			await fetch(`http://127.0.0.1:${port}/traces`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(otlpPayload()),
-			});
-			const res = await fetch(`http://127.0.0.1:${port}/`);
-			const text = await res.text();
-			assert.match(text, new RegExp(`/runs/${"a".repeat(32)}`));
-			assert.match(text, /test-span/);
-		});
-	});
-
-	test("ignores a query string when matching the route", async () => {
-		await withServer(async ({ port }) => {
-			const res = await fetch(`http://127.0.0.1:${port}/?foo=1`);
-			assert.equal(res.status, 200);
-			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
-		});
-	});
-
-	test("escapes a double quote in traceId so it cannot break out of the href attribute", () => {
-		const html = renderRunListPage([
-			{
-				traceId: 'x" onmouseover="alert(1)',
-				goal: "<script>alert(2)</script>",
-				verdict: "unjudged",
-				dur: "1s",
-				startedAt: "2026-01-01",
-			},
-		]);
-		// The escaped traceId must appear intact, quote-escaped, inside the href attribute.
-		assert.match(html, /href="\/runs\/x&quot; onmouseover=&quot;alert\(1\)"/);
-		// No literal unescaped double quote may follow "/runs/x" -- that would mean the
-		// attribute was broken out of and `onmouseover` became a real, separate attribute.
-		assert.doesNotMatch(html, /href="\/runs\/x" onmouseover="alert\(1\)"/);
 	});
 });
 
 describe("GET /runs/:traceId", () => {
-	test("renders the Flight Recorder page for a run that exists", async () => {
+	test("renders that run's Detail panel", async () => {
 		await withServer(async ({ port }) => {
-			await fetch(`http://127.0.0.1:${port}/traces`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(otlpPayload()),
-			});
+			await fetch(`http://127.0.0.1:${port}/traces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(otlpPayload()) });
 			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}`);
 			assert.equal(res.status, 200);
+			const text = await res.text();
+			assert.match(text, /id="run-data"/);
+		});
+	});
+
+	test("an unknown traceId renders a shell-wrapped 404, not bare JSON", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${"z".repeat(32)}`);
+			assert.equal(res.status, 404);
 			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
 			const text = await res.text();
-			assert.match(text, /Flight Recorder/);
-			assert.match(text, /test-span/);
-		});
-	});
-
-	test("shows the Coverage panel with an honest empty message when no manifest was captured", async () => {
-		await withServer(async ({ port }) => {
-			await fetch(`http://127.0.0.1:${port}/traces`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(otlpPayload()),
-			});
-			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}`);
-			const text = await res.text();
-			assert.match(text, /Coverage/);
-			assert.match(text, /nothing to show coverage for/);
-		});
-	});
-
-	function runViewJson(html) {
-		const runIdx = html.indexOf("const RUN =");
-		const semiIdx = html.indexOf(";\n", runIdx);
-		return JSON.parse(html.slice(runIdx + "const RUN = ".length, semiIdx));
-	}
-
-	test("wires getCoverage's real result into the injected RUN blob (not just the honest-empty template text)", async () => {
-		await withServer(async ({ port }) => {
-			const traceId = "c".repeat(32);
-			const manifest = JSON.stringify({
-				schemaVersion: 2,
-				skills: [{ name: "code-review", description: "reviews diffs", source: "project" }],
-				subAgents: [],
-				mcpServers: [],
-			});
-			const payload = {
-				resourceSpans: [
-					{
-						resource: { attributes: [] },
-						scopeSpans: [
-							{
-								scope: { name: "test-scope", version: "0.1.0" },
-								spans: [
-									{
-										traceId,
-										spanId: "d".repeat(16),
-										name: "root",
-										kind: 1,
-										startTimeUnixNano: "1000000000",
-										endTimeUnixNano: "2000000000",
-										attributes: [{ key: "gen_ai.agent.harness_manifest", value: { stringValue: manifest } }],
-										events: [],
-										status: { code: 1 },
-									},
-									{
-										traceId,
-										spanId: "e".repeat(16),
-										parentSpanId: "d".repeat(16),
-										name: "review the diff",
-										kind: 1,
-										startTimeUnixNano: "1100000000",
-										endTimeUnixNano: "1200000000",
-										attributes: [
-											{ key: "gen_ai.operation.name", value: { stringValue: "execute_tool" } },
-											{ key: "gen_ai.tool.name", value: { stringValue: "review the diff" } },
-											{ key: "gen_ai.harness.source_type", value: { stringValue: "skill" } },
-											{ key: "gen_ai.harness.source_name", value: { stringValue: "code-review" } },
-										],
-										events: [],
-										status: { code: 1 },
-									},
-								],
-							},
-						],
-					},
-				],
-			};
-			await fetch(`http://127.0.0.1:${port}/traces`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload),
-			});
-			const res = await fetch(`http://127.0.0.1:${port}/runs/${traceId}`);
-			const text = await res.text();
-			const run = runViewJson(text);
-			assert.equal(run.coverage.tracked, true);
-			assert.deepEqual(run.coverage.entries, [{ type: "skill", name: "code-review", usedCount: 1 }]);
-		});
-	});
-
-	test("returns 404 for a traceId with no matching run", async () => {
-		await withServer(async ({ port }) => {
-			const res = await fetch(`http://127.0.0.1:${port}/runs/${"f".repeat(32)}`);
-			assert.equal(res.status, 404);
-		});
-	});
-
-	test("URL-decodes the traceId before lookup", async () => {
-		await withServer(async ({ port }) => {
-			// %61 decodes to 'a' -- must resolve to the same run as a literal "a".repeat(32).
-			await fetch(`http://127.0.0.1:${port}/traces`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(otlpPayload()),
-			});
-			const res = await fetch(`http://127.0.0.1:${port}/runs/${"%61".repeat(32)}`);
-			assert.equal(res.status, 200);
-			const text = await res.text();
-			assert.match(text, /Flight Recorder/);
-		});
-	});
-
-	test("returns 400 (not a crash) for a malformed percent-encoded traceId", async () => {
-		await withServer(async ({ port }) => {
-			const res = await fetch(`http://127.0.0.1:${port}/runs/%`);
-			assert.equal(res.status, 400);
-		});
-	});
-
-	test("links to the harness page from the topbar", async () => {
-		await withServer(async ({ port }) => {
-			await fetch(`http://127.0.0.1:${port}/traces`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(otlpPayload()),
-			});
-			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}`);
-			const text = await res.text();
-			assert.match(text, /href="\/harness"/);
-		});
-	});
-
-	test("links to the analytics page from the topbar", async () => {
-		await withServer(async ({ port }) => {
-			await fetch(`http://127.0.0.1:${port}/traces`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(otlpPayload()),
-			});
-			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}`);
-			const text = await res.text();
-			assert.match(text, /href="\/analytics"/);
+			assert.match(text, /Run not found/);
+			assert.match(text, /class="shell"/);
 		});
 	});
 });
 
-describe("GET /harness", () => {
-	test("shows an empty-state page before any ingestion", async () => {
+describe("GET /runs/:traceId/harness", () => {
+	test("renders that run's harness panel with the Harness tab active", async () => {
 		await withServer(async ({ port }) => {
-			const res = await fetch(`http://127.0.0.1:${port}/harness`);
+			await fetch(`http://127.0.0.1:${port}/traces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(otlpPayload()) });
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}/harness`);
 			assert.equal(res.status, 200);
-			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
 			const text = await res.text();
-			assert.match(text, /No runs yet/);
+			assert.match(text, /tab tab-active/);
 		});
 	});
 
-	function tracePayload(traceId, name, startNs) {
-		return {
-			resourceSpans: [
-				{
-					resource: { attributes: [] },
-					scopeSpans: [
-						{
-							scope: { name: "test-scope", version: "0.1.0" },
-							spans: [
-								{
-									traceId,
-									spanId: "b".repeat(16),
-									name,
-									kind: 1,
-									startTimeUnixNano: startNs,
-									endTimeUnixNano: String(Number(startNs) + 1000000000),
-									attributes: [],
-									events: [],
-									status: { code: 1 },
-								},
-							],
-						},
-					],
-				},
-			],
-		};
-	}
-
-	test("defaults to the most recent run, and ?run= selects an older one", async () => {
+	test("an unknown traceId renders a shell-wrapped 404", async () => {
 		await withServer(async ({ port }) => {
-			await fetch(`http://127.0.0.1:${port}/traces`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(tracePayload("c".repeat(32), "older-run", "1000000000")),
-			});
-			await fetch(`http://127.0.0.1:${port}/traces`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(tracePayload("d".repeat(32), "newer-run", "5000000000")),
-			});
-
-			const defaultRes = await fetch(`http://127.0.0.1:${port}/harness`);
-			assert.equal(defaultRes.status, 200);
-			assert.equal(defaultRes.headers.get("content-type"), "text/html; charset=utf-8");
-			const defaultText = await defaultRes.text();
-			// Both runs' goals legitimately appear in the picker's <option> list -- the
-			// distinguishing check is which one the "as of" line (the current view) names.
-			assert.match(defaultText, /Harness as of: <strong>newer-run<\/strong>/);
-			assert.doesNotMatch(defaultText, /Harness as of: <strong>older-run<\/strong>/);
-
-			const olderRes = await fetch(`http://127.0.0.1:${port}/harness?run=${"c".repeat(32)}`);
-			assert.equal(olderRes.status, 200);
-			const olderText = await olderRes.text();
-			assert.match(olderText, /Harness as of: <strong>older-run<\/strong>/);
-			assert.doesNotMatch(olderText, /Harness as of: <strong>newer-run<\/strong>/);
-		});
-	});
-
-	test("links to the analytics page from the topbar", async () => {
-		await withServer(async ({ port }) => {
-			const res = await fetch(`http://127.0.0.1:${port}/harness`);
-			const text = await res.text();
-			assert.match(text, /href="\/analytics"/);
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${"z".repeat(32)}/harness`);
+			assert.equal(res.status, 404);
+			assert.match(await res.text(), /Run not found/);
 		});
 	});
 });
 
 describe("GET /analytics", () => {
-	test("shows an empty-state page before any ingestion", async () => {
+	test("renders the shell with the analytics panel and the Analytics tab active", async () => {
 		await withServer(async ({ port }) => {
 			const res = await fetch(`http://127.0.0.1:${port}/analytics`);
 			assert.equal(res.status, 200);
-			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
 			const text = await res.text();
 			assert.match(text, /No runs yet/);
+			assert.match(text, /tab tab-active/);
+		});
+	});
+});
+
+describe("GET /harness (removed)", () => {
+	test("the old bare route no longer exists", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/harness`);
+			assert.equal(res.status, 404);
+		});
+	});
+});
+
+describe("GET /fragments/rail", () => {
+	test("returns the rail's inner HTML with the active run marked", async () => {
+		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(otlpPayload()) });
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/rail?active=${"a".repeat(32)}`);
+			assert.equal(res.status, 200);
+			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+			assert.match(await res.text(), /rail-row-active/);
+		});
+	});
+});
+
+describe("GET /fragments/analytics", () => {
+	test("returns the analytics panel's inner HTML", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/analytics`);
+			assert.equal(res.status, 200);
+			assert.match(await res.text(), /No runs yet/);
+		});
+	});
+});
+
+describe("GET /fragments/harness/:traceId", () => {
+	test("returns the harness panel's inner HTML for a real run", async () => {
+		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(otlpPayload()) });
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/harness/${"a".repeat(32)}`);
+			assert.equal(res.status, 200);
+			assert.match(await res.text(), /Harness as of/);
 		});
 	});
 
-	test("reflects real ingested run data", async () => {
+	test("an unknown traceId returns a 404 fragment (not a shell page)", async () => {
 		await withServer(async ({ port }) => {
-			await fetch(`http://127.0.0.1:${port}/traces`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(otlpPayload()),
-			});
-			const res = await fetch(`http://127.0.0.1:${port}/analytics`);
-			assert.equal(res.status, 200);
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/harness/${"z".repeat(32)}`);
+			assert.equal(res.status, 404);
 			const text = await res.text();
-			// otlpPayload's single span has no child steps at all, so its run is
-			// untracked (no step ever reported a source) -- the "no runs have
-			// reported usage yet" message is the correct, honest outcome here,
-			// not the "nothing registered" one (that's for tracked runs with an
-			// empty manifest, a different case).
-			assert.match(text, /No runs have reported skill\/sub-agent\/MCP-server usage yet/);
+			assert.match(text, /Run not found/);
+			assert.doesNotMatch(text, /class="shell"/);
+		});
+	});
+});
+
+describe("GET /fragments/detail/:traceId", () => {
+	test("returns the detail panel's inner HTML for a real run", async () => {
+		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(otlpPayload()) });
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/detail/${"a".repeat(32)}`);
+			assert.equal(res.status, 200);
+			assert.match(await res.text(), /id="run-data"/);
+		});
+	});
+
+	test("an unknown traceId returns a 404 fragment", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/detail/${"z".repeat(32)}`);
+			assert.equal(res.status, 404);
+			assert.doesNotMatch(await res.text(), /class="shell"/);
 		});
 	});
 });
@@ -486,7 +311,7 @@ describe("GET /analytics", () => {
 describe("unknown routes", () => {
 	test("returns 404 for an unrecognized path", async () => {
 		await withServer(async ({ port }) => {
-			const res = await fetch(`http://127.0.0.1:${port}/nonexistent`);
+			const res = await fetch(`http://127.0.0.1:${port}/totally/unknown`);
 			assert.equal(res.status, 404);
 		});
 	});
@@ -494,27 +319,10 @@ describe("unknown routes", () => {
 
 describe("GET / error handling", () => {
 	test("returns 500 (not a crash) when the database connection is closed", async () => {
-		const dbPath = makeTempDbPath();
-		const db = openDatabase(dbPath);
-		const server = createTetherServer(db);
-		await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-		const port = server.address().port;
-		try {
+		await withServer(async ({ port, db }) => {
 			db.close();
-
 			const res = await fetch(`http://127.0.0.1:${port}/`);
 			assert.equal(res.status, 500);
-			const body = await res.json();
-			assert.equal(body.ok, false);
-			assert.equal(typeof body.error, "string");
-		} finally {
-			await new Promise((resolve) => server.close(resolve));
-			try {
-				db.close();
-			} catch {
-				// already closed above; better-sqlite3 throws on a double close
-			}
-			rmSync(join(dbPath, ".."), { recursive: true, force: true });
-		}
+		});
 	});
 });

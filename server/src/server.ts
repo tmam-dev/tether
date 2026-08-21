@@ -1,21 +1,27 @@
 /**
  * Tether's local HTTP server: accepts the same OTLP/JSON payload
- * mcp/src/otlp.ts sends, stores every span, and serves a run list page
- * plus a per-run Flight Recorder page. No auth -- binds 127.0.0.1 only
- * (see index.ts), nothing here checks headers.
+ * mcp/src/otlp.ts sends, stores every span, and serves the unified shell
+ * (run rail + a Detail/Harness/Analytics panel) plus the /fragments/* routes
+ * its client router fetches for in-app navigation.
  */
 
-import { createServer, IncomingMessage, Server } from "node:http";
+import { createServer, IncomingMessage, ServerResponse, Server } from "node:http";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import { insertSpan } from "./db.js";
 import { getRun, listRuns } from "./runs.js";
 import { getHarnessView } from "./harness.js";
 import { getCoverage } from "./coverage.js";
 import { getUsage } from "./analytics.js";
-import { renderFlightRecorderPage } from "./templates/flight-recorder.js";
-import { renderRunListPage } from "./templates/run-list.js";
-import { renderHarnessPage } from "./templates/harness.js";
-import { renderAnalyticsPage } from "./templates/analytics.js";
+import { renderDetailFragment, renderEmptyDetailPanel } from "./templates/flight-recorder.js";
+import { renderRailBody } from "./templates/rail.js";
+import { renderHarnessBody } from "./templates/harness.js";
+import { renderAnalyticsBody } from "./templates/analytics.js";
+import { renderShell, renderNotFoundPanel } from "./templates/shell.js";
+import type { ShellState } from "./templates/shell.js";
+
+const APP_JS = readFileSync(fileURLToPath(new URL("./static/app.js", import.meta.url)), "utf-8");
 
 interface OtlpSpan {
 	traceId: string;
@@ -46,6 +52,21 @@ async function readBody(req: IncomingMessage): Promise<string> {
 	return Buffer.concat(chunks).toString("utf-8");
 }
 
+function sendError(res: ServerResponse, status: number, error: string): void {
+	res.writeHead(status, { "Content-Type": "application/json" });
+	res.end(JSON.stringify({ ok: false, error }));
+}
+
+/** Decodes a traceId path segment, writing a 400 and returning null on a malformed one. */
+function decodeTraceIdOr400(raw: string, res: ServerResponse): string | null {
+	try {
+		return decodeURIComponent(raw);
+	} catch {
+		sendError(res, 400, "malformed traceId");
+		return null;
+	}
+}
+
 export function createTetherServer(db: Database.Database): Server {
 	return createServer(async (req, res) => {
 		const pathname = (req.url ?? "").split("?")[0];
@@ -69,78 +90,142 @@ export function createTetherServer(db: Database.Database): Server {
 				res.writeHead(200, { "Content-Type": "application/json" });
 				res.end(JSON.stringify({ ok: true, spansIngested: spans.length }));
 			} catch (err) {
-				res.writeHead(400, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ ok: false, error: (err as Error).message }));
+				sendError(res, 400, (err as Error).message);
 			}
 			return;
 		}
 
-		if (req.method === "GET" && pathname === "/") {
+		if (req.method === "GET" && pathname === "/app.js") {
+			res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+			res.end(APP_JS);
+			return;
+		}
+
+		if (req.method === "GET" && pathname === "/fragments/rail") {
 			try {
-				const page = renderRunListPage(listRuns(db, 50));
+				const query = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+				const active = query.get("active") ?? undefined;
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-				res.end(page);
+				res.end(renderRailBody(listRuns(db, 50), active, Date.now()));
 			} catch (err) {
-				res.writeHead(500, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ ok: false, error: (err as Error).message }));
+				sendError(res, 500, (err as Error).message);
 			}
 			return;
 		}
 
-		if (req.method === "GET" && pathname.startsWith("/runs/")) {
-			let traceId: string;
+		if (req.method === "GET" && pathname === "/fragments/analytics") {
 			try {
-				traceId = decodeURIComponent(pathname.slice("/runs/".length));
-			} catch {
-				res.writeHead(400, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ ok: false, error: "malformed traceId" }));
-				return;
+				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+				res.end(renderAnalyticsBody(getUsage(db)));
+			} catch (err) {
+				sendError(res, 500, (err as Error).message);
 			}
+			return;
+		}
+
+		if (req.method === "GET" && pathname.startsWith("/fragments/harness/")) {
+			const traceId = decodeTraceIdOr400(pathname.slice("/fragments/harness/".length), res);
+			if (traceId === null) return;
+			try {
+				const view = getHarnessView(db, traceId);
+				if (!view) {
+					res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+					res.end(renderNotFoundPanel());
+					return;
+				}
+				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+				res.end(renderHarnessBody(view));
+			} catch (err) {
+				sendError(res, 500, (err as Error).message);
+			}
+			return;
+		}
+
+		if (req.method === "GET" && pathname.startsWith("/fragments/detail/")) {
+			const traceId = decodeTraceIdOr400(pathname.slice("/fragments/detail/".length), res);
+			if (traceId === null) return;
 			try {
 				const run = getRun(db, traceId);
 				if (!run) {
-					res.writeHead(404, { "Content-Type": "application/json" });
-					res.end(JSON.stringify({ ok: false, error: "run not found" }));
+					res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+					res.end(renderNotFoundPanel());
 					return;
 				}
-				const page = renderFlightRecorderPage(run, getCoverage(db, traceId));
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-				res.end(page);
+				res.end(renderDetailFragment(run, getCoverage(db, traceId)));
 			} catch (err) {
-				res.writeHead(500, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ ok: false, error: (err as Error).message }));
+				sendError(res, 500, (err as Error).message);
 			}
 			return;
 		}
 
-		if (req.method === "GET" && pathname === "/harness") {
+		const harnessPathMatch = pathname.match(/^\/runs\/([^/]+)\/harness$/);
+		if (req.method === "GET" && harnessPathMatch) {
+			const traceId = decodeTraceIdOr400(harnessPathMatch[1], res);
+			if (traceId === null) return;
 			try {
-				const query = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
-				const traceId = query.get("run") ?? undefined;
+				const rail = renderRailBody(listRuns(db, 50), traceId, Date.now());
 				const view = getHarnessView(db, traceId);
-				const page = renderHarnessPage(view, listRuns(db, 50));
+				const state: ShellState = { view: "harness", traceId };
+				if (!view) {
+					res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+					res.end(renderShell(state, "Tether — Run not found", rail, renderNotFoundPanel()));
+					return;
+				}
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-				res.end(page);
+				res.end(renderShell(state, "Tether — Harness", rail, renderHarnessBody(view)));
 			} catch (err) {
-				res.writeHead(500, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ ok: false, error: (err as Error).message }));
+				sendError(res, 500, (err as Error).message);
+			}
+			return;
+		}
+
+		const detailPathMatch = pathname.match(/^\/runs\/([^/]+)$/);
+		if (req.method === "GET" && (pathname === "/" || detailPathMatch)) {
+			try {
+				const runs = listRuns(db, 50);
+				let traceId: string | null;
+				if (pathname === "/") {
+					traceId = runs[0]?.traceId ?? null;
+				} else {
+					const decoded = decodeTraceIdOr400(detailPathMatch![1], res);
+					if (decoded === null) return;
+					traceId = decoded;
+				}
+
+				const rail = renderRailBody(runs, traceId ?? undefined, Date.now());
+				if (traceId === null) {
+					res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+					res.end(renderShell({ view: "detail" }, "Tether", rail, renderEmptyDetailPanel()));
+					return;
+				}
+
+				const run = getRun(db, traceId);
+				const state: ShellState = { view: "detail", traceId };
+				if (!run) {
+					res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+					res.end(renderShell(state, "Tether — Run not found", rail, renderNotFoundPanel()));
+					return;
+				}
+				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+				res.end(renderShell(state, `Tether — ${run.goal}`, rail, renderDetailFragment(run, getCoverage(db, traceId))));
+			} catch (err) {
+				sendError(res, 500, (err as Error).message);
 			}
 			return;
 		}
 
 		if (req.method === "GET" && pathname === "/analytics") {
 			try {
-				const page = renderAnalyticsPage(getUsage(db));
+				const rail = renderRailBody(listRuns(db, 50), undefined, Date.now());
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-				res.end(page);
+				res.end(renderShell({ view: "analytics" }, "Tether — Analytics", rail, renderAnalyticsBody(getUsage(db))));
 			} catch (err) {
-				res.writeHead(500, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ ok: false, error: (err as Error).message }));
+				sendError(res, 500, (err as Error).message);
 			}
 			return;
 		}
 
-		res.writeHead(404, { "Content-Type": "application/json" });
-		res.end(JSON.stringify({ ok: false, error: "not found" }));
+		sendError(res, 404, "not found");
 	});
 }
