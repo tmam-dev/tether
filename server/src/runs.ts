@@ -25,6 +25,8 @@ export interface StepView {
 	tok: number | null;
 	io: [string, string][];
 	sig?: RetrySignal[];
+	sourceType?: "skill" | "sub_agent" | "mcp_server";
+	sourceName?: string;
 }
 
 export type Verdict = "met" | "partial" | "failed" | "unjudged";
@@ -110,6 +112,11 @@ export function toIsoOrEmpty(ns: bigint): string {
 /** Returns v if it's a string, otherwise undefined -- guards against a non-string attribute value where a string is expected (attributes arrive from unauthenticated, unvalidated ingest, so gen_ai.agent.goal etc. can be any OTLP value type). */
 export function asString(v: unknown): string | undefined {
 	return typeof v === "string" ? v : undefined;
+}
+
+/** Returns v if it's one of the three recognized source types, otherwise undefined -- an unrecognized value from unauthenticated ingest is treated the same as no attribution at all. */
+function asSourceType(v: unknown): StepView["sourceType"] {
+	return v === "skill" || v === "sub_agent" || v === "mcp_server" ? v : undefined;
 }
 
 function formatDuration(startNs: string, endNs: string): string {
@@ -204,6 +211,8 @@ export function getRun(db: Database.Database, traceId: string): RunView | null {
 		const tok = typeof parsed.attrs["gen_ai.usage.total_tokens"] === "number" ? (parsed.attrs["gen_ai.usage.total_tokens"] as number) : null;
 		if (cost !== null) totalCost = (totalCost ?? 0) + cost;
 		if (tok !== null) totalTokens = (totalTokens ?? 0) + tok;
+		const sourceType = asSourceType(parsed.attrs["gen_ai.harness.source_type"]);
+		const sourceName = asString(parsed.attrs["gen_ai.harness.source_name"]);
 
 		steps.push({
 			type: inferStepType(parsed.attrs),
@@ -214,6 +223,7 @@ export function getRun(db: Database.Database, traceId: string): RunView | null {
 			cost,
 			tok,
 			io: buildStepIo(parsed.events),
+			...(sourceType && sourceName ? { sourceType, sourceName } : {}),
 		});
 	}
 

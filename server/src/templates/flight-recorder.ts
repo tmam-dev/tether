@@ -1,4 +1,5 @@
 import type { RunView } from "../runs.js";
+import type { CoverageView } from "../coverage.js";
 
 /**
  * Adapted from trail's design/agent-observability-prototypes:flight-recorder.html
@@ -158,6 +159,9 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
   .io-sig svg { width: 17px; height: 17px; flex: none; margin-top: 1px; }
   .io-sig .st { font-weight: 600; }
   .insp-empty { color: var(--ink-3); font-size: 13px; }
+  .cov-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 13px; }
+  .cov-status { color: var(--ink-3); font-family: var(--mono); font-size: 11.5px; }
+  .cov-status.cov-used { color: var(--met); }
   .pin-note { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--accent-ink); margin-bottom: 10px; }
   .pin-note button { font: inherit; color: var(--ink-3); background: transparent; border: 0; cursor: pointer; text-decoration: underline; margin-left: auto; }
 
@@ -232,6 +236,11 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
       <div class="panel-head"><h2 id="inspTitle">Verdict</h2></div>
       <div class="insp" id="insp"></div>
     </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Coverage</h2></div>
+    <div class="insp" id="coverage"></div>
   </section>
 
   <div class="foot"><a href="/">&larr; back to all runs</a></div>
@@ -396,6 +405,35 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
     insp.innerHTML = '<div class="insp-section"><h3>LLM judge</h3><div class="judge-quote">'+escapeHtml(r.narrative||'')+'</div></div>';
   }
 
+  function coverageList(entries, emptyMsg) {
+    if (!entries.length) return '<div class="insp-empty">'+emptyMsg+'</div>';
+    return entries.map(function(e) {
+      const used = e.usedCount > 0;
+      const status = used ? '✓ used ('+e.usedCount+' step'+(e.usedCount===1?'':'s')+')' : '— not used';
+      return '<div class="cov-row"><span>'+escapeHtml(e.name)+'</span><span class="cov-status'+(used?' cov-used':'')+'">'+status+'</span></div>';
+    }).join('');
+  }
+
+  function renderCoverage() {
+    const cov = RUN.coverage;
+    const el = $('coverage');
+    if (!cov || !cov.entries.length) {
+      el.innerHTML = '<div class="insp-empty">No skills, sub-agents, or MCP servers were registered for this run — nothing to show coverage for.</div>';
+      return;
+    }
+    if (!cov.tracked) {
+      el.innerHTML = '<div class="insp-empty">Coverage not tracked for this run — no step reported which skill, sub-agent, or MCP server it came from.</div>';
+      return;
+    }
+    const skills = cov.entries.filter(function(e){ return e.type==='skill'; });
+    const subAgents = cov.entries.filter(function(e){ return e.type==='sub_agent'; });
+    const mcpServers = cov.entries.filter(function(e){ return e.type==='mcp_server'; });
+    el.innerHTML =
+      '<div class="insp-section"><h3>Skills</h3>'+coverageList(skills, 'No skills registered for this run.')+'</div>'
+      + '<div class="insp-section"><h3>Sub-agents</h3>'+coverageList(subAgents, 'No sub-agents registered for this run.')+'</div>'
+      + '<div class="insp-section"><h3>MCP servers</h3>'+coverageList(mcpServers, 'No MCP servers registered for this run.')+'</div>';
+  }
+
   function renderStepIO(s, i) {
     $('inspTitle').textContent = (s.title)+' · step '+(i+1);
     const insp = $('insp');
@@ -452,18 +490,18 @@ const TEMPLATE = `<title>Tether — Flight Recorder</title>
     document.addEventListener('keydown',(e)=>{ if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return; if(e.key===' '){ e.preventDefault(); setPlaying(!playing); } });
   }
 
-  renderMission(); renderStrip(); renderSteps(); renderInspector(); updatePlayhead(); initControls();
+  renderMission(); renderStrip(); renderSteps(); renderInspector(); renderCoverage(); updatePlayhead(); initControls();
 })();
 </script>
 `;
 
-export function renderFlightRecorderPage(run: RunView): string {
+export function renderFlightRecorderPage(run: RunView, coverage: CoverageView | null): string {
 	// Escape `<` so a field like `</script><img src=x onerror=...>` can't break out of the
 	// inline <script> block, and escape the JS line-terminator characters (valid in JSON
 	// strings, illegal inside a JS string literal in older engines). Use a function replacer
 	// (not a string one) so a goal containing "$&" / "$'" etc. can't trigger String.replace's
 	// special replacement-pattern handling and corrupt the surrounding template.
-	const json = JSON.stringify(run)
+	const json = JSON.stringify({ ...run, coverage })
 		.replace(/</g, "\\u003c")
 		.replace(/\u2028/g, "\\u2028")
 		.replace(/\u2029/g, "\\u2029");

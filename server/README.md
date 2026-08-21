@@ -33,10 +33,13 @@ claude mcp add trail -- npx -y trailai-mcp
   run's detail page.
 - `GET /runs/:traceId` — the Flight Recorder view for one run: goal, verdict
   (when a judge is configured), a scrubbable step timeline with play/pause/
-  speed controls, and per-step expansion showing raw input/output. Adapted
-  from a design prototype, cut down to exactly what's captured today — no
-  pinned criteria, sub-goals, guardrail/eval signals, diffs, or context-window
-  inspector, since none of that data exists yet.
+  speed controls, per-step expansion showing raw input/output, and a
+  Coverage panel showing which of the run's harness manifest entries
+  (skills/sub-agents/MCP servers) were actually used, when the coding agent
+  reports that attribution. Adapted from a design prototype, cut down to
+  exactly what's captured today — no pinned criteria, sub-goals,
+  guardrail/eval signals, diffs, or context-window inspector, since none of
+  that data exists yet.
 - `GET /harness` (optionally `?run=<traceId>`) — the harness anatomy page: the
   skills, sub-agents, and MCP servers a run's harness had available, reshaped
   from the manifest `mcp/` stamps on every run. Defaults to the most recent

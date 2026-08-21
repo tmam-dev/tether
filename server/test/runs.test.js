@@ -217,6 +217,75 @@ describe("getRun", () => {
 			rmSync(join(dbPath, ".."), { recursive: true, force: true });
 		}
 	});
+
+	test("reshapes a step's source_type/source_name attribution when present", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "t10", spanId: "r10", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1100000000000" }));
+			const attributed = stepSpan({ traceId: "t10", spanId: "s1", parentSpanId: "r10", name: "review the diff", startNs: "1010000000000", endNs: "1011000000000", toolName: "review the diff" });
+			attributed.raw = JSON.stringify({ ...JSON.parse(attributed.raw), attributes: [...JSON.parse(attributed.raw).attributes, { key: "gen_ai.harness.source_type", value: { stringValue: "skill" } }, { key: "gen_ai.harness.source_name", value: { stringValue: "code-review" } }] });
+			insertSpan(db, attributed);
+			const unattributed = stepSpan({ traceId: "t10", spanId: "s2", parentSpanId: "r10", name: "plain step", startNs: "1012000000000", endNs: "1013000000000" });
+			insertSpan(db, unattributed);
+
+			const run = getRun(db, "t10");
+			const step1 = run.steps.find((s) => s.title === "review the diff");
+			const step2 = run.steps.find((s) => s.title === "plain step");
+			assert.equal(step1.sourceType, "skill");
+			assert.equal(step1.sourceName, "code-review");
+			assert.equal(step2.sourceType, undefined);
+			assert.equal(step2.sourceName, undefined);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("ignores an unrecognized source_type value rather than passing it through", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "t11", spanId: "r11", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1100000000000" }));
+			const step = stepSpan({ traceId: "t11", spanId: "s1", parentSpanId: "r11", name: "weird step", startNs: "1010000000000", endNs: "1011000000000" });
+			step.raw = JSON.stringify({ ...JSON.parse(step.raw), attributes: [...JSON.parse(step.raw).attributes, { key: "gen_ai.harness.source_type", value: { stringValue: "not-a-real-type" } }, { key: "gen_ai.harness.source_name", value: { stringValue: "whatever" } }] });
+			insertSpan(db, step);
+
+			const run = getRun(db, "t11");
+			assert.equal(run.steps[0].sourceType, undefined);
+			assert.equal(run.steps[0].sourceName, undefined);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("drops a half-formed attribution pair (source_type with no source_name, or vice versa)", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "t12", spanId: "r12", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1100000000000" }));
+
+			const typeOnly = stepSpan({ traceId: "t12", spanId: "s1", parentSpanId: "r12", name: "type only", startNs: "1010000000000", endNs: "1011000000000" });
+			typeOnly.raw = JSON.stringify({ ...JSON.parse(typeOnly.raw), attributes: [...JSON.parse(typeOnly.raw).attributes, { key: "gen_ai.harness.source_type", value: { stringValue: "skill" } }] });
+			insertSpan(db, typeOnly);
+
+			const nameOnly = stepSpan({ traceId: "t12", spanId: "s2", parentSpanId: "r12", name: "name only", startNs: "1012000000000", endNs: "1013000000000" });
+			nameOnly.raw = JSON.stringify({ ...JSON.parse(nameOnly.raw), attributes: [...JSON.parse(nameOnly.raw).attributes, { key: "gen_ai.harness.source_name", value: { stringValue: "code-review" } }] });
+			insertSpan(db, nameOnly);
+
+			const run = getRun(db, "t12");
+			const step1 = run.steps.find((s) => s.title === "type only");
+			const step2 = run.steps.find((s) => s.title === "name only");
+			assert.equal(step1.sourceType, undefined);
+			assert.equal(step1.sourceName, undefined);
+			assert.equal(step2.sourceType, undefined);
+			assert.equal(step2.sourceName, undefined);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
 });
 
 describe("malformed nanosecond timestamps never throw (finding 5)", () => {

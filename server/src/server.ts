@@ -10,6 +10,7 @@ import type Database from "better-sqlite3";
 import { insertSpan } from "./db.js";
 import { getRun, listRuns } from "./runs.js";
 import { getHarnessView } from "./harness.js";
+import { getCoverage } from "./coverage.js";
 import { renderFlightRecorderPage } from "./templates/flight-recorder.js";
 import { renderRunListPage } from "./templates/run-list.js";
 import { renderHarnessPage } from "./templates/harness.js";
@@ -100,7 +101,7 @@ export function createTetherServer(db: Database.Database): Server {
 					res.end(JSON.stringify({ ok: false, error: "run not found" }));
 					return;
 				}
-				const page = renderFlightRecorderPage(run);
+				const page = renderFlightRecorderPage(run, getCoverage(db, traceId));
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 				res.end(page);
 			} catch (err) {

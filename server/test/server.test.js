@@ -226,6 +226,90 @@ describe("GET /runs/:traceId", () => {
 		});
 	});
 
+	test("shows the Coverage panel with an honest empty message when no manifest was captured", async () => {
+		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(otlpPayload()),
+			});
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}`);
+			const text = await res.text();
+			assert.match(text, /Coverage/);
+			assert.match(text, /nothing to show coverage for/);
+		});
+	});
+
+	function runViewJson(html) {
+		const runIdx = html.indexOf("const RUN =");
+		const semiIdx = html.indexOf(";\n", runIdx);
+		return JSON.parse(html.slice(runIdx + "const RUN = ".length, semiIdx));
+	}
+
+	test("wires getCoverage's real result into the injected RUN blob (not just the honest-empty template text)", async () => {
+		await withServer(async ({ port }) => {
+			const traceId = "c".repeat(32);
+			const manifest = JSON.stringify({
+				schemaVersion: 2,
+				skills: [{ name: "code-review", description: "reviews diffs", source: "project" }],
+				subAgents: [],
+				mcpServers: [],
+			});
+			const payload = {
+				resourceSpans: [
+					{
+						resource: { attributes: [] },
+						scopeSpans: [
+							{
+								scope: { name: "test-scope", version: "0.1.0" },
+								spans: [
+									{
+										traceId,
+										spanId: "d".repeat(16),
+										name: "root",
+										kind: 1,
+										startTimeUnixNano: "1000000000",
+										endTimeUnixNano: "2000000000",
+										attributes: [{ key: "gen_ai.agent.harness_manifest", value: { stringValue: manifest } }],
+										events: [],
+										status: { code: 1 },
+									},
+									{
+										traceId,
+										spanId: "e".repeat(16),
+										parentSpanId: "d".repeat(16),
+										name: "review the diff",
+										kind: 1,
+										startTimeUnixNano: "1100000000",
+										endTimeUnixNano: "1200000000",
+										attributes: [
+											{ key: "gen_ai.operation.name", value: { stringValue: "execute_tool" } },
+											{ key: "gen_ai.tool.name", value: { stringValue: "review the diff" } },
+											{ key: "gen_ai.harness.source_type", value: { stringValue: "skill" } },
+											{ key: "gen_ai.harness.source_name", value: { stringValue: "code-review" } },
+										],
+										events: [],
+										status: { code: 1 },
+									},
+								],
+							},
+						],
+					},
+				],
+			};
+			await fetch(`http://127.0.0.1:${port}/traces`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${traceId}`);
+			const text = await res.text();
+			const run = runViewJson(text);
+			assert.equal(run.coverage.tracked, true);
+			assert.deepEqual(run.coverage.entries, [{ type: "skill", name: "code-review", usedCount: 1 }]);
+		});
+	});
+
 	test("returns 404 for a traceId with no matching run", async () => {
 		await withServer(async ({ port }) => {
 			const res = await fetch(`http://127.0.0.1:${port}/runs/${"f".repeat(32)}`);

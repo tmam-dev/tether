@@ -136,9 +136,13 @@ server.registerTool(
 			status: statusSchema,
 			error_message: z.string().optional(),
 			duration_ms: z.number().optional().describe("How long the step took (defaults to instant)"),
+			source_type: z.enum(["skill", "sub_agent", "mcp_server"]).optional()
+				.describe("If this step came from a registered skill, sub-agent, or MCP server, which kind"),
+			source_name: z.string().optional()
+				.describe("Name of the skill/sub-agent/MCP server, matching an entry from this run's harness manifest"),
 		},
 	},
-	async ({ run_id, name, kind, input, output, status, error_message, duration_ms }) => {
+	async ({ run_id, name, kind, input, output, status, error_message, duration_ms, source_type, source_name }) => {
 		const run = getRun(run_id);
 		const end = nowNanos();
 		const start = duration_ms
@@ -160,6 +164,7 @@ server.registerTool(
 				"gen_ai.system": "trail-mcp",
 				"gen_ai.agent.name": run.agent,
 				...(kind === "tool" ? { "gen_ai.tool.name": name } : {}),
+				...(source_type && source_name ? { "gen_ai.harness.source_type": source_type, "gen_ai.harness.source_name": source_name } : {}),
 			},
 			events: [
 				...(input ? [{ name: "gen_ai.content.prompt", attributes: { "gen_ai.prompt": input } }] : []),
