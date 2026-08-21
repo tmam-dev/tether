@@ -1,0 +1,46 @@
+{
+  "name": "trailai-tether",
+  "version": "0.1.0",
+  "description": "Tether — local, self-hosted agent-harness observability. Embedded SQLite storage for the OTLP traces trailai-mcp sends.",
+  "type": "module",
+  "bin": { "trailai-tether": "dist/index.js" },
+  "main": "dist/index.js",
+  "files": ["dist", "README.md", "LICENSE", "package.json"],
+  "homepage": "https://github.com/tmam-dev/tether/tree/main/server#readme",
+  "bugs": {
+    "url": "https://github.com/tmam-dev/tether/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tmam-dev/tether.git",
+    "directory": "server"
+  },
+  "keywords": [
+    "tether",
+    "agent",
+    "observability",
+    "self-hosted",
+    "opentelemetry",
+    "otlp",
+    "sqlite"
+  ],
+  "author": "Tether",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build && npm test",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js",
+    "test": "node --test test/*.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "env-paths": "^3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0",
+    "@types/better-sqlite3": "^7.6.0"
+  },
+  "engines": { "node": ">=18" }
+}
