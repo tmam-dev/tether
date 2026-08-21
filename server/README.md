@@ -29,10 +29,14 @@ claude mcp add trail -- npx -y trailai-mcp
 - `POST /traces` — OTLP/JSON ingestion, matches the wire format
   `trailai-mcp` already sends. No auth (nothing to protect on one
   developer's own machine).
-- `GET /` — a placeholder page confirming the server is running and how
-  many runs have been ingested. The real Flight Recorder UI (run timeline,
-  goal-attainment verdict, harness anatomy) is separate, larger, upcoming
-  work — this is just the ingestion/storage foundation it will sit on.
+- `GET /` — a run list: goal, verdict, duration, start time, linking into each
+  run's detail page.
+- `GET /runs/:traceId` — the Flight Recorder view for one run: goal, verdict
+  (when a judge is configured), a scrubbable step timeline with play/pause/
+  speed controls, and per-step expansion showing raw input/output. Adapted
+  from a design prototype, cut down to exactly what's captured today — no
+  pinned criteria, sub-goals, guardrail/eval signals, diffs, or context-window
+  inspector, since none of that data exists yet.
 
 ## Building from source
 
