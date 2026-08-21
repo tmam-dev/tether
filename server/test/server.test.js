@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { openDatabase, countTraces } from "../dist/db.js";
 import { getRun } from "../dist/runs.js";
 import { createTetherServer } from "../dist/server.js";
+import { renderRunListPage } from "../dist/templates/run-list.js";
 
 function makeTempDbPath() {
 	const dir = mkdtempSync(join(tmpdir(), "tether-server-test-"));
@@ -171,6 +172,23 @@ describe("GET /", () => {
 			assert.match(text, new RegExp(`/runs/${"a".repeat(32)}`));
 			assert.match(text, /test-span/);
 		});
+	});
+
+	test("escapes a double quote in traceId so it cannot break out of the href attribute", () => {
+		const html = renderRunListPage([
+			{
+				traceId: 'x" onmouseover="alert(1)',
+				goal: "<script>alert(2)</script>",
+				verdict: "unjudged",
+				dur: "1s",
+				startedAt: "2026-01-01",
+			},
+		]);
+		// The escaped traceId must appear intact, quote-escaped, inside the href attribute.
+		assert.match(html, /href="\/runs\/x&quot; onmouseover=&quot;alert\(1\)"/);
+		// No literal unescaped double quote may follow "/runs/x" -- that would mean the
+		// attribute was broken out of and `onmouseover` became a real, separate attribute.
+		assert.doesNotMatch(html, /href="\/runs\/x" onmouseover="alert\(1\)"/);
 	});
 });
 

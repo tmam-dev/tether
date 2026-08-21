@@ -4,7 +4,7 @@ const VERDICT_LABEL: Record<string, string> = { met: "Goal met", partial: "Parti
 const VERDICT_COLOR: Record<string, string> = { met: "#2FA24A", partial: "#C08810", failed: "#DC4A38", unjudged: "#8A8F97" };
 
 function escapeHtml(s: string): string {
-	return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+	return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 }
 
 function row(run: RunSummary): string {
