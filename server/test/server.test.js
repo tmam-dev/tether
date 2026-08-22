@@ -326,3 +326,149 @@ describe("GET / error handling", () => {
 		});
 	});
 });
+
+// C2 regression: every route below computes its render output into a local variable BEFORE its
+// writeHead call, so a render-time throw is caught inside the try and reported by sendError()
+// as the FIRST header write for that response -- not a second one after writeHead(200, ...)
+// already ran. A closed db makes listRuns()/getRun()/getUsage() throw, which is the same failure
+// shape a poisoned verdict caused before C1 was fixed. Before the C2 fix, every route other than
+// `GET /` wrote headers before evaluating its render expression, so this same test would have
+// crashed the whole server process with ERR_HTTP_HEADERS_SENT instead of returning 500.
+describe("error handling on routes beyond GET / (C2 regression)", () => {
+	test("GET /fragments/rail returns 500 (not a crash) when the database connection is closed", async () => {
+		await withServer(async ({ port, db }) => {
+			db.close();
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/rail`);
+			assert.equal(res.status, 500);
+			const body = await res.json();
+			assert.equal(body.ok, false);
+		});
+	});
+
+	test("GET /fragments/analytics returns 500 (not a crash) when the database connection is closed", async () => {
+		await withServer(async ({ port, db }) => {
+			db.close();
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/analytics`);
+			assert.equal(res.status, 500);
+			const body = await res.json();
+			assert.equal(body.ok, false);
+		});
+	});
+
+	test("GET /runs/:traceId returns 500 (not a crash) when the database connection is closed", async () => {
+		await withServer(async ({ port, db }) => {
+			db.close();
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}`);
+			assert.equal(res.status, 500);
+			const body = await res.json();
+			assert.equal(body.ok, false);
+		});
+	});
+
+	test("GET /runs/:traceId/harness returns 500 (not a crash) when the database connection is closed", async () => {
+		await withServer(async ({ port, db }) => {
+			db.close();
+			const res = await fetch(`http://127.0.0.1:${port}/runs/${"a".repeat(32)}/harness`);
+			assert.equal(res.status, 500);
+			const body = await res.json();
+			assert.equal(body.ok, false);
+		});
+	});
+
+	test("GET /analytics returns 500 (not a crash) when the database connection is closed", async () => {
+		await withServer(async ({ port, db }) => {
+			db.close();
+			const res = await fetch(`http://127.0.0.1:${port}/analytics`);
+			assert.equal(res.status, 500);
+			const body = await res.json();
+			assert.equal(body.ok, false);
+		});
+	});
+
+	test("GET /fragments/detail returns 500 (not a crash) when the database connection is closed", async () => {
+		await withServer(async ({ port, db }) => {
+			db.close();
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/detail`);
+			assert.equal(res.status, 500);
+			const body = await res.json();
+			assert.equal(body.ok, false);
+		});
+	});
+});
+
+describe("GET /fragments/detail (I2: server-side resolution of '/')", () => {
+	test("an empty store returns the empty detail panel body", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/detail`);
+			assert.equal(res.status, 200);
+			assert.match(await res.text(), /No runs yet/);
+		});
+	});
+
+	test("with runs, returns the most recent run's detail fragment (matches GET / resolution)", async () => {
+		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(otlpPayload()) });
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/detail`);
+			assert.equal(res.status, 200);
+			assert.match(await res.text(), /id="run-data"/);
+		});
+	});
+});
+
+describe("malformed traceId (Minor 4)", () => {
+	test("GET /runs/:traceId with a malformed traceId renders a shell-wrapped page, not bare JSON", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/runs/%`);
+			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+			const text = await res.text();
+			assert.match(text, /class="shell"/);
+		});
+	});
+
+	test("GET /runs/:traceId/harness with a malformed traceId renders a shell-wrapped page, not bare JSON", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/runs/%/harness`);
+			assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+			const text = await res.text();
+			assert.match(text, /class="shell"/);
+		});
+	});
+
+	test("GET /fragments/detail/:traceId with a malformed traceId still returns bare JSON", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/detail/%`);
+			assert.equal(res.status, 400);
+			const body = await res.json();
+			assert.equal(body.ok, false);
+		});
+	});
+
+	test("GET /fragments/harness/:traceId with a malformed traceId still returns bare JSON", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/fragments/harness/%`);
+			assert.equal(res.status, 400);
+			const body = await res.json();
+			assert.equal(body.ok, false);
+		});
+	});
+});
+
+describe("live repro: poisoned verdict no longer crashes any route (C1 + C2 combined)", () => {
+	test("ingesting a trace with verdict '__proto__' does not crash GET /, /fragments/rail, /fragments/detail, /analytics, or /runs/:traceId", async () => {
+		await withServer(async ({ port }) => {
+			const payload = otlpPayload();
+			payload.resourceSpans[0].scopeSpans[0].spans[0].attributes.push({ key: "gen_ai.agent.verdict", value: { stringValue: "__proto__" } });
+			const ingestRes = await fetch(`http://127.0.0.1:${port}/traces`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+			assert.equal(ingestRes.status, 200);
+
+			for (const path of ["/", "/fragments/rail", "/fragments/detail", "/analytics", `/runs/${"a".repeat(32)}`, `/fragments/detail/${"a".repeat(32)}`]) {
+				const res = await fetch(`http://127.0.0.1:${port}${path}`);
+				assert.equal(res.status, 200, `${path} should render 200, not crash`);
+			}
+		});
+	});
+});

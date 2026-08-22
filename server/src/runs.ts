@@ -119,6 +119,16 @@ function asSourceType(v: unknown): StepView["sourceType"] {
 	return v === "skill" || v === "sub_agent" || v === "mcp_server" ? v : undefined;
 }
 
+/** Returns v if it's one of the four recognized verdict values, otherwise "unjudged" -- guards
+ * against a poisoned attacker-controlled verdict (e.g. "__proto__", "constructor",
+ * "hasOwnProperty") from unauthenticated ingest. Every downstream consumer (rail.ts, app.ts) does
+ * a plain-object lookup keyed by this value; without this validation at the boundary, a poisoned
+ * verdict resolves via the prototype chain instead of falling through a `?? fallback`, handing the
+ * consumer a function or `Object.prototype` where it expects a string and crashing the renderer. */
+export function asVerdict(v: unknown): Verdict {
+	return v === "met" || v === "partial" || v === "failed" ? v : "unjudged";
+}
+
 function formatDuration(startNs: string, endNs: string): string {
 	const start = toNs(startNs);
 	const end = toNs(endNs);
@@ -188,7 +198,7 @@ export function getRun(db: Database.Database, traceId: string): RunView | null {
 	const root = parseRaw(rootRow.raw);
 	if (!root) return null;
 
-	const verdict = (root.attrs["gen_ai.agent.verdict"] as Verdict | undefined) ?? "unjudged";
+	const verdict = asVerdict(root.attrs["gen_ai.agent.verdict"]);
 	const score = typeof root.attrs["gen_ai.agent.verdict_score"] === "number" ? (root.attrs["gen_ai.agent.verdict_score"] as number) : null;
 	const narrative = typeof root.attrs["gen_ai.agent.verdict_narrative"] === "string" ? (root.attrs["gen_ai.agent.verdict_narrative"] as string) : null;
 
@@ -257,7 +267,7 @@ export function listRuns(db: Database.Database, limit: number): RunSummary[] {
 		summaries.push({
 			traceId: row.traceId,
 			goal: asString(parsed.attrs["gen_ai.agent.goal"]) ?? row.name,
-			verdict: (parsed.attrs["gen_ai.agent.verdict"] as Verdict | undefined) ?? "unjudged",
+			verdict: asVerdict(parsed.attrs["gen_ai.agent.verdict"]),
 			dur: formatDuration(row.startTimeUnixNano, row.endTimeUnixNano),
 			startedAt: toIsoOrEmpty(startNs),
 		});

@@ -1,7 +1,13 @@
 import type { RunSummary } from "../runs.js";
 
-const VERDICT_COLOR: Record<string, string> = { met: "#2FA24A", partial: "#C08810", failed: "#DC4A38", unjudged: "#8A8F97" };
-const VERDICT_LABEL: Record<string, string> = { met: "Goal met", partial: "Partial", failed: "Goal missed", unjudged: "Not judged" };
+// Object.assign(Object.create(null), ...) rather than a plain object literal: `run.verdict` is
+// attacker-controlled (arrives via the unauthenticated POST /traces endpoint), and runs.ts's
+// asVerdict() is the primary guard against a poisoned value like "__proto__" or "constructor"
+// reaching here at all -- but a null-prototype lookup table means even a value that somehow
+// bypassed that boundary resolves via `??`/`hasOwnProperty` semantics instead of walking the
+// prototype chain to a function or Object.prototype, which would crash escapeHtml() below.
+const VERDICT_COLOR: Record<string, string> = Object.assign(Object.create(null), { met: "#2FA24A", partial: "#C08810", failed: "#DC4A38", unjudged: "#8A8F97" });
+const VERDICT_LABEL: Record<string, string> = Object.assign(Object.create(null), { met: "Goal met", partial: "Partial", failed: "Goal missed", unjudged: "Not judged" });
 
 function escapeHtml(s: string): string {
 	return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));

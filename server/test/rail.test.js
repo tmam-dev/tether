@@ -66,6 +66,18 @@ describe("renderRailBody", () => {
 		assert.match(html, /Not judged/);
 	});
 
+	test("a poisoned verdict of '__proto__' does not crash rendering via the prototype chain, and falls back to 'unjudged'", () => {
+		const html = renderRailBody([run({ verdict: "__proto__" })], undefined, Date.now());
+		assert.match(html, /#8A8F97/);
+		assert.match(html, /Not judged/);
+	});
+
+	test("a poisoned verdict of 'constructor' does not crash rendering via the prototype chain, and falls back to 'unjudged'", () => {
+		const html = renderRailBody([run({ verdict: "constructor" })], undefined, Date.now());
+		assert.match(html, /#8A8F97/);
+		assert.match(html, /Not judged/);
+	});
+
 	test("each row links to the run's detail page", () => {
 		const html = renderRailBody([run({ traceId: "c".repeat(32) })], undefined, Date.now());
 		assert.match(html, new RegExp(`href="/runs/${"c".repeat(32)}"`));
