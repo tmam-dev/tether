@@ -210,6 +210,10 @@ const STYLE = `
 	@media (prefers-reduced-motion: reduce) { * { transition: none !important; } .play-btn { display: none; } }
 `;
 
+// Invariant that must hold on both this server-rendered version and app.ts's client-updated
+// updateHarnessTab(): no `href` attribute on the Harness tab iff aria-disabled="true".
+// onRailOrTabClick's disabled check and any code doing `new URL(anchor.href)` on this tab depend
+// on that equivalence holding in both places.
 function topbar(state: ShellState): string {
 	const disabled = !state.traceId;
 	const hrefAttr = state.traceId ? ` href="/runs/${escapeHtml(state.traceId)}/harness"` : "";
@@ -236,7 +240,7 @@ export function renderShell(state: ShellState, title: string, railHtml: string, 
 <style>${STYLE}</style>
 <div class="shell">
 	<nav class="rail-wrap">
-		<div class="rail-brand"><span class="brand-name">Tether</span><a href="/" class="rail-home" aria-label="All runs" title="All runs">&larr;</a></div>
+		<div class="rail-brand"><span class="brand-name">Tether</span><a href="/" class="rail-home" aria-label="Latest run" title="Latest run">&larr;</a></div>
 		<div id="rail">${railHtml}</div>
 	</nav>
 	<div class="main-wrap">

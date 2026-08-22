@@ -128,6 +128,18 @@ describe("mountDetailPanel", () => {
 		assert.match(elements.mission.innerHTML, /goal-title/);
 	});
 
+	test("a poisoned verdict of '__proto__' does not crash rendering via the prototype chain", () => {
+		const { elements, mountDetailPanel } = loadApp();
+		assert.doesNotThrow(() => mountDetailPanel(makeRunData({ verdict: "__proto__" })));
+		assert.match(elements.mission.innerHTML, /goal-title/);
+	});
+
+	test("a poisoned verdict of 'constructor' does not crash rendering via the prototype chain", () => {
+		const { elements, mountDetailPanel } = loadApp();
+		assert.doesNotThrow(() => mountDetailPanel(makeRunData({ verdict: "constructor" })));
+		assert.match(elements.mission.innerHTML, /goal-title/);
+	});
+
 	test("a judged run with a missing score does not render a completion percentage", () => {
 		const { elements, mountDetailPanel } = loadApp();
 		mountDetailPanel(makeRunData({ verdict: "met", score: null }));
@@ -162,17 +174,21 @@ describe("mountDetailPanel", () => {
 });
 
 describe("router: path parsing and fragment URLs", () => {
-	test("parsePathname recognizes all four route shapes and rejects everything else", () => {
+	test("parsePathname recognizes all five route shapes and rejects everything else", () => {
 		const { sandbox } = loadApp();
+		// I2: "/" now resolves to a real state (most-recent-run detail), not null -- returning null
+		// here is what used to send a Back navigation to "/" through navigateTo's full-reload
+		// fallback instead of fetching client-side.
+		assert.deepEqual(sandbox.parsePathname("/"), { view: "detail", traceId: null });
 		assert.deepEqual(sandbox.parsePathname("/analytics"), { view: "analytics", traceId: null });
 		assert.deepEqual(sandbox.parsePathname("/runs/" + "a".repeat(32)), { view: "detail", traceId: "a".repeat(32) });
 		assert.deepEqual(sandbox.parsePathname("/runs/" + "a".repeat(32) + "/harness"), { view: "harness", traceId: "a".repeat(32) });
-		assert.equal(sandbox.parsePathname("/"), null);
 		assert.equal(sandbox.parsePathname("/something-else"), null);
 	});
 
 	test("fragmentUrlFor maps each ShellState to its matching /fragments/* URL", () => {
 		const { sandbox } = loadApp();
+		assert.equal(sandbox.fragmentUrlFor({ view: "detail", traceId: null }), "/fragments/detail");
 		assert.equal(sandbox.fragmentUrlFor({ view: "analytics", traceId: null }), "/fragments/analytics");
 		assert.equal(sandbox.fragmentUrlFor({ view: "harness", traceId: "b".repeat(32) }), "/fragments/harness/" + "b".repeat(32));
 		assert.equal(sandbox.fragmentUrlFor({ view: "detail", traceId: "c".repeat(32) }), "/fragments/detail/" + "c".repeat(32));
@@ -230,6 +246,114 @@ describe("router: navigation", () => {
 		assert.equal((windowListeners.mouseup ?? []).length, 0);
 		assert.equal(elements.content.innerHTML, "<p>analytics body</p>");
 	});
+
+	// I2: Back to "/" (the landing page, and the single most common Back target) must not fall
+	// through to navigateTo's full-reload branch. Before the fix, parsePathname("/") returned null,
+	// so this exact call would have set windowStub.location.href instead of fetching.
+	test("navigating to '/' (e.g. a Back navigation to the landing page) fetches /fragments/detail instead of reloading", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		let fetchedUrl = null;
+		windowStub.fetch = (url) => { fetchedUrl = url; return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("<p>latest run</p>") }); };
+
+		await sandbox.navigateTo("/", false);
+
+		assert.equal(fetchedUrl, "/fragments/detail");
+		assert.equal(windowStub.location.href, ""); // unchanged -- a full reload would have set this
+		assert.equal(elements.content.innerHTML, "<p>latest run</p>");
+	});
+
+	test("navigating to '/' resolves the Harness tab and rail to the server-resolved run's actual traceId", async () => {
+		const { windowStub, sandbox } = loadApp();
+		const harnessTab = new FakeElement("harnessTab", null);
+		let setHref = null;
+		harnessTab.setAttribute = (n, v) => { if (n === "href") setHref = v; };
+		harnessTab.removeAttribute = () => {};
+		harnessTab.classList = { toggle() {}, contains() { return false; }, add() {}, remove() {} };
+		sandbox.document.querySelector = (sel) => (sel === '[data-nav="harness"]' ? harnessTab : null);
+
+		const resolvedId = "i".repeat(32);
+		const detailHtml = '<script type="application/json" id="run-data">' + JSON.stringify({ traceId: resolvedId, goal: "g", agent: "a", verdict: "unjudged", score: null, narrative: null, totals: { dur: "1s", cost: null, tokens: null, steps: 0 }, steps: [], coverage: null }) + "</script>";
+		windowStub.fetch = () => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(detailHtml) });
+
+		await sandbox.navigateTo("/", false);
+
+		// The client had no way to know resolvedId in advance -- parsePathname("/") only knows
+		// traceId: null. This proves navigateTo read the actual resolved traceId back out of the
+		// #run-data island the fetched fragment carried, not just target.traceId.
+		assert.equal(setHref, "/runs/" + resolvedId + "/harness");
+	});
+
+	// I4: two overlapping navigations (e.g. two rail clicks in quick succession) must not let
+	// whichever fetch happens to resolve last win the #content swap regardless of click order.
+	test("a stale in-flight navigation is ignored once a newer navigation has started and finished", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		const pushed = [];
+		windowStub.history.pushState = (_state, _title, url) => pushed.push(url);
+
+		let resolveFirstFetch;
+		const firstFetchGate = new Promise((resolve) => { resolveFirstFetch = resolve; });
+		let fetchCount = 0;
+		windowStub.fetch = () => {
+			fetchCount++;
+			if (fetchCount === 1) {
+				// The FIRST (soon-to-be-stale) navigation's fetch: deliberately held open until we
+				// release it below, after the second navigation has already been kicked off.
+				return firstFetchGate.then(() => ({ ok: true, status: 200, text: () => Promise.resolve("<p>first (stale)</p>") }));
+			}
+			return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("<p>second (winner)</p>") });
+		};
+
+		const firstNav = sandbox.navigateTo("/analytics", true);
+		const secondNav = sandbox.navigateTo("/runs/" + "k".repeat(32), true);
+		resolveFirstFetch();
+		await Promise.all([firstNav, secondNav]);
+
+		// Only the second (later-started) navigation's result should have landed -- the first
+		// navigation's late-arriving response must not have overwritten it.
+		assert.equal(elements.content.innerHTML, "<p>second (winner)</p>");
+		assert.deepEqual(pushed, ["/runs/" + "k".repeat(32)]);
+	});
+});
+
+describe("router: rail polling", () => {
+	test("after navigating to a run's Detail view, pollRail fetches /fragments/rail with that run marked active and replaces #rail", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		windowStub.fetch = () => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("<p>run body</p>") });
+		await sandbox.navigateTo("/runs/" + "l".repeat(32), true);
+
+		let polledUrl = null;
+		windowStub.fetch = (url) => { polledUrl = url; return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("<a>polled rail</a>") }); };
+		sandbox.pollRail();
+		await new Promise((resolve) => setImmediate(resolve));
+
+		assert.equal(polledUrl, "/fragments/rail?active=" + "l".repeat(32));
+		assert.equal(elements.rail.innerHTML, "<a>polled rail</a>");
+	});
+
+	test("after navigating to Analytics, pollRail fetches /fragments/rail with no ?active= param", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		windowStub.fetch = () => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("<p>analytics body</p>") });
+		await sandbox.navigateTo("/analytics", true);
+
+		let polledUrl = null;
+		windowStub.fetch = (url) => { polledUrl = url; return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("<a>polled rail</a>") }); };
+		sandbox.pollRail();
+		await new Promise((resolve) => setImmediate(resolve));
+
+		assert.equal(polledUrl, "/fragments/rail");
+		assert.equal(elements.rail.innerHTML, "<a>polled rail</a>");
+	});
+
+	test("a failed poll fetch does not throw and leaves #rail untouched", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		elements.rail.innerHTML = "<a>original rail</a>";
+		windowStub.fetch = () => Promise.reject(new Error("network down"));
+
+		assert.doesNotThrow(() => sandbox.pollRail());
+		await new Promise((resolve) => setImmediate(resolve));
+
+		assert.equal(elements.rail.innerHTML, "<a>original rail</a>");
+	});
 });
 
 describe("router: Harness tab sync", () => {
@@ -282,5 +406,26 @@ describe("router: Harness tab sync", () => {
 		sandbox.onRailOrTabClick(event);
 
 		assert.equal(navigated, false);
+	});
+
+	// Minor 6: the disabled-tab test above only proves navigateTo wasn't called -- that assertion
+	// would pass just as well if the stub were never wired up correctly at all. This positive
+	// companion proves the stub is actually live by clicking a non-disabled anchor and checking it
+	// DOES fire, and with the expected pathname.
+	test("clicking a non-disabled anchor does trigger navigation", () => {
+		const { sandbox } = loadApp();
+		let navigatedTo = null;
+		sandbox.navigateTo = (pathname) => { navigatedTo = pathname; return Promise.resolve(); };
+
+		const anchor = {
+			getAttribute: () => null,
+			href: "http://localhost/runs/" + "g".repeat(32) + "/harness",
+		};
+		const targetEl = { closest: () => anchor };
+		const event = { target: targetEl, button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, preventDefault: () => {} };
+
+		sandbox.onRailOrTabClick(event);
+
+		assert.equal(navigatedTo, "/runs/" + "g".repeat(32) + "/harness");
 	});
 });

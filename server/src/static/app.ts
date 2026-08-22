@@ -1,3 +1,10 @@
+// Deliberately no IIFE/module wrapper around this file's top level: every top-level function
+// declaration below becomes a `window` property, which is both how this file works as a plain
+// classic <script> (no export {} to force ES-module treatment -- see tsconfig.json's
+// moduleDetection: "legacy") and how test/app.test.js's vm-based harness reaches functions like
+// mountDetailPanel/navigateTo/parsePathname directly as sandbox properties. Don't "fix" this by
+// wrapping the file in an IIFE -- it'll silently break every router test.
+
 type RunData = import("../runs.js").RunView & { coverage: import("../coverage.js").CoverageView | null };
 
 function $<T extends HTMLElement = HTMLElement>(id: string): T {
@@ -30,12 +37,19 @@ const TYPE_COLOR: Record<string, [string, string]> = {
 	tool: ["#C77DBB", "rgba(199,125,187,0.14)"], llm: ["#5FA8D3", "rgba(95,168,211,0.14)"],
 	search: ["#6FA96B", "rgba(111,169,107,0.14)"],
 };
-const VERDICT: Record<string, { label: string; color: string; wash: string; line: string; glyph: string }> = {
+// Object.assign(Object.create(null), ...) rather than a plain object literal: `runData.verdict`
+// is attacker-controlled (arrives via the unauthenticated POST /traces endpoint, serialized
+// straight through into the run-data JSON island). runs.ts's asVerdict() is the primary guard
+// against a poisoned value like "__proto__" or "constructor" reaching this far -- but a
+// null-prototype lookup table means even a value that somehow bypassed that boundary resolves via
+// the `|| VERDICT.unjudged` fallback instead of walking the prototype chain to a function or
+// Object.prototype, which would otherwise silently corrupt (rather than crash) the rendered badge.
+const VERDICT: Record<string, { label: string; color: string; wash: string; line: string; glyph: string }> = Object.assign(Object.create(null), {
 	met: { label: "Goal met", color: "var(--met)", wash: "var(--met-wash)", line: "rgba(47,162,74,0.35)", glyph: '<circle cx="12" cy="12" r="9"/><path d="M8 12.3l2.6 2.6L16 9.2"/>' },
 	partial: { label: "Partial", color: "var(--partial)", wash: "var(--partial-wash)", line: "rgba(192,136,16,0.35)", glyph: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 15.7v.1"/>' },
 	failed: { label: "Goal missed", color: "var(--failed)", wash: "var(--failed-wash)", line: "rgba(220,74,56,0.35)", glyph: '<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>' },
 	unjudged: { label: "Not judged", color: "var(--ink-3)", wash: "var(--panel-2)", line: "var(--line)", glyph: '<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>' },
-};
+});
 
 /**
  * Mounts the Detail (Flight Recorder) panel into the skeleton renderDetailFragment already put in
@@ -325,7 +339,19 @@ type WindowWithInitialState = Window & { __TETHER_INITIAL__?: ShellState };
 let currentUnmount: (() => void) | null = null;
 let currentState: ShellState = { view: "detail", traceId: null };
 
+// Monotonically-increasing navigation token (I4): incremented at the start of every navigateTo
+// call. A navigation checks, after each await, whether it's still the most recently started one
+// before touching #content/currentState/history -- so two overlapping navigations (e.g. two rail
+// clicks in quick succession) can never race, regardless of which fetch resolves first.
+let navSeq = 0;
+
 function parsePathname(pathname: string): ShellState | null {
+	// "/" resolves to the most recent run's Detail panel, same as the server does -- returning a
+	// real state here (not null) lets the router fetch it client-side via /fragments/detail
+	// instead of falling through to navigateTo's full-reload branch. That fallback is exactly what
+	// used to make a Back navigation to "/" (the most common Back target, since "/" is the landing
+	// page) always full-reload -- see I2.
+	if (pathname === "/") return { view: "detail", traceId: null };
 	if (pathname === "/analytics") return { view: "analytics", traceId: null };
 	const harnessMatch = pathname.match(/^\/runs\/([^/]+)\/harness$/);
 	if (harnessMatch) return { view: "harness", traceId: decodeURIComponent(harnessMatch[1]) };
@@ -337,7 +363,8 @@ function parsePathname(pathname: string): ShellState | null {
 function fragmentUrlFor(state: ShellState): string {
 	if (state.view === "analytics") return "/fragments/analytics";
 	if (state.view === "harness") return `/fragments/harness/${encodeURIComponent(state.traceId as string)}`;
-	return `/fragments/detail/${encodeURIComponent(state.traceId as string)}`;
+	if (state.traceId == null) return "/fragments/detail";
+	return `/fragments/detail/${encodeURIComponent(state.traceId)}`;
 }
 
 function setTabActive(view: ShellState["view"]): void {
@@ -352,6 +379,10 @@ function setRailActive(traceId: string | null): void {
 	});
 }
 
+// Invariant that must hold on both this client-updated version and shell.ts's topbar()'s
+// server-rendered version: no `href` attribute on the Harness tab iff aria-disabled="true".
+// onRailOrTabClick's disabled check and any code doing `new URL(anchor.href)` on this tab depend
+// on that equivalence holding in both places.
 function updateHarnessTab(traceId: string | null): void {
 	const tab = document.querySelector('[data-nav="harness"]');
 	if (!tab) return;
@@ -366,14 +397,19 @@ function updateHarnessTab(traceId: string | null): void {
 	}
 }
 
-function mountRunDataIfPresent(): void {
+/** Mounts the embedded #run-data island if present, returning the traceId it actually mounted --
+ * or null if there was none (empty-store panel) or no #run-data at all. The caller (navigateTo)
+ * needs this back because /fragments/detail (no traceId in the URL) resolves server-side to
+ * "whichever run is most recent," which the client can't know in advance (see I2). */
+function mountRunDataIfPresent(): string | null {
 	const dataEl = document.getElementById("run-data");
-	if (!dataEl) return;
+	if (!dataEl) return null;
 	// RunData is the type mountDetailPanel (Task 6, same module) already declares.
 	const runData = JSON.parse(dataEl.textContent || "null") as RunData | null;
-	if (!runData) return;
+	if (!runData) return null;
 	currentUnmount = mountDetailPanel(runData);
 	document.title = `Tether — ${runData.goal}`;
+	return runData.traceId;
 }
 
 function renderRetry(retry: () => void): void {
@@ -386,13 +422,22 @@ async function navigateTo(pathname: string, push: boolean): Promise<void> {
 	const target = parsePathname(pathname);
 	if (!target) { window.location.href = pathname; return; }
 
+	// I4: claim this navigation's token before the first await. Since every navigateTo call
+	// increments navSeq synchronously before it ever yields, the final value of navSeq by the time
+	// any call resumes is already whatever the LAST call to start set it to -- so this comparison
+	// is race-proof regardless of the order the two fetches actually resolve in.
+	const seq = ++navSeq;
+
 	let html: string;
 	let status: number;
 	try {
 		const res = await window.fetch(fragmentUrlFor(target));
+		if (seq !== navSeq) return; // a newer navigation started while this fetch was in flight
 		status = res.status;
 		html = await res.text();
+		if (seq !== navSeq) return; // ditto, after the body read
 	} catch {
+		if (seq !== navSeq) return;
 		renderRetry(() => navigateTo(pathname, push));
 		return;
 	}
@@ -403,21 +448,28 @@ async function navigateTo(pathname: string, push: boolean): Promise<void> {
 
 	if (currentUnmount) { currentUnmount(); currentUnmount = null; }
 	$("content").innerHTML = html;
-	currentState = target;
+
+	// The traceId the fetched fragment actually resolved to. Usually just target.traceId, except
+	// for target.view === "detail" && target.traceId === null (i.e. pathname "/"), where the
+	// server picked "most recent run" and the client only learns which run that was from the
+	// #run-data island just mounted (I2).
+	let resolvedTraceId = target.traceId;
 
 	if (status === 404) {
 		document.title = "Tether — Run not found";
 	} else if (target.view === "detail") {
-		mountRunDataIfPresent();
+		resolvedTraceId = mountRunDataIfPresent() ?? target.traceId;
 	} else if (target.view === "harness") {
 		document.title = "Tether — Harness";
 	} else {
 		document.title = "Tether — Analytics";
 	}
 
+	currentState = target.view === "detail" ? { view: "detail", traceId: resolvedTraceId } : target;
+
 	setTabActive(target.view);
-	setRailActive(target.view === "analytics" ? null : target.traceId);
-	updateHarnessTab(target.view === "analytics" ? null : target.traceId);
+	setRailActive(target.view === "analytics" ? null : resolvedTraceId);
+	updateHarnessTab(target.view === "analytics" ? null : resolvedTraceId);
 	if (push) window.history.pushState(null, "", pathname);
 }
 
