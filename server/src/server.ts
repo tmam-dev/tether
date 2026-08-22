@@ -230,9 +230,9 @@ export function createTetherServer(db: Database.Database): Server {
 
 		const harnessPathMatch = pathname.match(/^\/runs\/([^/]+)\/harness$/);
 		if (req.method === "GET" && harnessPathMatch) {
-			const traceId = decodeTraceIdOrShellError(harnessPathMatch[1], res, db, "harness");
-			if (traceId === null) return;
 			try {
+				const traceId = decodeTraceIdOrShellError(harnessPathMatch[1], res, db, "harness");
+				if (traceId === null) return;
 				const rail = buildRail(db, traceId);
 				const view = getHarnessView(db, traceId);
 				const state: ShellState = { view: "harness", traceId };

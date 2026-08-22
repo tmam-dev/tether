@@ -128,16 +128,18 @@ describe("mountDetailPanel", () => {
 		assert.match(elements.mission.innerHTML, /goal-title/);
 	});
 
-	test("a poisoned verdict of '__proto__' does not crash rendering via the prototype chain", () => {
+	test("a poisoned verdict of '__proto__' does not crash rendering via the prototype chain, and falls back to 'Not judged'", () => {
 		const { elements, mountDetailPanel } = loadApp();
 		assert.doesNotThrow(() => mountDetailPanel(makeRunData({ verdict: "__proto__" })));
 		assert.match(elements.mission.innerHTML, /goal-title/);
+		assert.match(elements.mission.innerHTML, /Not judged/);
 	});
 
-	test("a poisoned verdict of 'constructor' does not crash rendering via the prototype chain", () => {
+	test("a poisoned verdict of 'constructor' does not crash rendering via the prototype chain, and falls back to 'Not judged'", () => {
 		const { elements, mountDetailPanel } = loadApp();
 		assert.doesNotThrow(() => mountDetailPanel(makeRunData({ verdict: "constructor" })));
 		assert.match(elements.mission.innerHTML, /goal-title/);
+		assert.match(elements.mission.innerHTML, /Not judged/);
 	});
 
 	test("a judged run with a missing score does not render a completion percentage", () => {

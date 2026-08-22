@@ -453,6 +453,25 @@ describe("malformed traceId (Minor 4)", () => {
 	});
 });
 
+// Regression: decodeTraceIdOrShellError was called OUTSIDE this route's try block. Its own
+// error-rendering path (for a malformed traceId) calls buildRail(db, undefined) -> listRuns(db,
+// 50), which throws when the db is closed. A throw from before `try {` escapes the async handler
+// as an unhandled promise rejection and crashes the whole process -- this test would have hung/
+// crashed the whole `node --test` run against the pre-fix code instead of getting a response back.
+describe("GET /runs/:traceId/harness with a malformed traceId and a closed db (route-handler regression)", () => {
+	test("returns 500 (not a crash) and the server keeps working afterward", async () => {
+		await withServer(async ({ port, db }) => {
+			db.close();
+			const res = await fetch(`http://127.0.0.1:${port}/runs/%/harness`);
+			assert.equal(res.status, 500);
+
+			// The process must still be alive to answer this second request at all.
+			const followUp = await fetch(`http://127.0.0.1:${port}/runs/${"z".repeat(32)}/harness`);
+			assert.equal(followUp.status, 500);
+		});
+	});
+});
+
 describe("live repro: poisoned verdict no longer crashes any route (C1 + C2 combined)", () => {
 	test("ingesting a trace with verdict '__proto__' does not crash GET /, /fragments/rail, /fragments/detail, /analytics, or /runs/:traceId", async () => {
 		await withServer(async ({ port }) => {
