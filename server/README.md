@@ -29,9 +29,9 @@ claude mcp add trail -- npx -y trailai-mcp
 - `POST /traces` — OTLP/JSON ingestion, matches the wire format
   `trailai-mcp` already sends. No auth (nothing to protect on one
   developer's own machine).
-- A single-page shell: a left rail lists every run (goal, verdict,
-  relative time, live-updated every 5s) and stays on screen while the
-  main panel swaps between three views, navigated client-side with no
+- A single-page shell: a left rail lists the 50 most recent runs (goal,
+  verdict, relative time, live-updated every 5s) and stays on screen while
+  the main panel swaps between three views, navigated client-side with no
   full page reload:
   - **Detail** (`/runs/:traceId`, or `/` for the most recent run) — the
     Flight Recorder view: goal, verdict, a scrubbable step timeline with
@@ -45,9 +45,15 @@ claude mcp add trail -- npx -y trailai-mcp
   - **Analytics** (`/analytics`) — aggregates coverage across every run
     in the store: which skills/sub-agents/MCP servers are used vs.
     registered but never touched ("dead weight").
-  Every route above is also a real, direct, no-JS server-rendered page
-  — client-side navigation (via `/app.js`) is progressive enhancement
-  on top of that, not a replacement for it.
+  Every route above is a real server route — direct load, reload, and
+  shared links all work without a client-side navigation step. Harness
+  and Analytics are fully server-rendered (no-JS renders the real page).
+  The Detail view builds its timeline in the browser from an embedded
+  JSON island, as it always has (this predates the unified shell — see
+  the Flight Recorder design spec) — with JS disabled you get the static
+  skeleton, not the rendered replay. Client-side navigation (via
+  `/app.js`) is progressive enhancement over the server routes, not a
+  replacement for them.
 
 ## Building from source
 
@@ -57,6 +63,13 @@ npm install
 npm run build
 npm test
 ```
+
+`tsconfig.json`'s `"moduleDetection": "legacy"` is what lets
+`src/static/app.ts` compile as a classic browser `<script>` (no
+`export {}` wrapper forcing ES-module treatment) instead of an ES
+module, despite the rest of this package being `"type": "module"` —
+`src/static/app.ts` is served as-is via `GET /app.js` and loaded with a
+plain `<script src="/app.js">`, not imported.
 
 ## License
 

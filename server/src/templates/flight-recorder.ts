@@ -63,10 +63,10 @@ const SKELETON = `
  * present at initial load or inserted later via innerHTML), read via textContent + JSON.parse by
  * app.ts's mountDetailPanel instead. `<` is still escaped so a goal containing a literal
  * "</script>" can't end this tag early at the HTML-parser level -- that risk is independent of the
- * tag's type attribute. The old  /  escaping is dropped: it only mattered when this JSON
- * was substituted directly into JS source (`const RUN = ...`) and eval'd; both characters are valid
- * inside a JSON string and inside a <script> tag's text content, so JSON.parse(textContent) needs
- * no help with them.
+ * tag's type attribute. The old U+2028/U+2029 line-terminator escaping is dropped: it only mattered
+ * when this JSON was substituted directly into JS source (`const RUN = ...`) and eval'd; both
+ * characters are valid inside a JSON string and inside a <script> tag's text content, so
+ * JSON.parse(textContent) needs no help with them.
  */
 export function renderDetailFragment(run: RunView, coverage: CoverageView | null): string {
 	const json = JSON.stringify({ ...run, coverage }).replace(/</g, "\\u003c");
