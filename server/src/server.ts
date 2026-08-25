@@ -5,7 +5,7 @@
  * its client router fetches for in-app navigation.
  */
 
-import { createServer, IncomingMessage, ServerResponse, Server } from "node:http";
+import { createServer, IncomingMessage, ServerResponse, Server, request as httpRequest } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
@@ -20,7 +20,7 @@ import { renderHarnessBody } from "./templates/harness.js";
 import { renderAnalyticsBody } from "./templates/analytics.js";
 import { renderShell, renderNotFoundPanel } from "./templates/shell.js";
 import type { ShellState, ShellView } from "./templates/shell.js";
-import { resolvePluginAssetPath, contentTypeFor } from "./plugins.js";
+import { resolvePluginAssetPath, contentTypeFor, readDevOverrides } from "./plugins.js";
 
 const APP_JS = readFileSync(fileURLToPath(new URL("./static/app.js", import.meta.url)), "utf-8");
 
@@ -99,6 +99,20 @@ function decodeTraceIdOrShellError(raw: string, res: ServerResponse, db: Databas
  * `renderRailBody(listRuns(db, 50), active, Date.now())` call several routes below need. */
 function buildRail(db: Database.Database, active: string | undefined): string {
 	return renderRailBody(listRuns(db, 50), active, Date.now());
+}
+
+/** Proxies a GET request to `targetBase + path` and pipes the response straight through to `res`.
+ * Used only for plugin dev-mode overrides (§3.2/§3.4 of the plugin spec) -- keeps the iframe's
+ * fetches to /api/v1/* same-origin even while the plugin's own assets are served by a separate
+ * dev server, since the proxy itself is same-origin from the browser's perspective. */
+function proxyGet(targetBase: string, path: string, res: ServerResponse): void {
+	const target = new URL(path, targetBase);
+	const proxyReq = httpRequest(target, { method: "GET" }, (proxyRes) => {
+		res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers as Record<string, string>);
+		proxyRes.pipe(res);
+	});
+	proxyReq.on("error", () => sendError(res, 502, "dev server unreachable"));
+	proxyReq.end();
 }
 
 export function createTetherServer(db: Database.Database, options: { pluginsRoot: string }): Server {
@@ -279,6 +293,11 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 			try {
 				const slug = decodeURIComponent(pluginAssetMatch[1]);
 				const assetPath = decodeURIComponent(pluginAssetMatch[2]);
+				const overrides = readDevOverrides(pluginsRoot);
+				if (overrides[slug]) {
+					proxyGet(overrides[slug], `/${assetPath}`, res);
+					return;
+				}
 				const resolved = resolvePluginAssetPath(pluginsRoot, slug, assetPath);
 				if (!resolved) {
 					sendError(res, 404, "plugin asset not found");

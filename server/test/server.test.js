@@ -1,9 +1,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, cpSync } from "node:fs";
+import { mkdtempSync, rmSync, cpSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { createServer as createHttpServer } from "node:http";
 import { openDatabase, countTraces } from "../dist/db.js";
 import { createTetherServer } from "../dist/server.js";
 
@@ -577,6 +578,27 @@ describe("GET /plugins/:slug/*", () => {
 			const res = await fetch(`http://127.0.0.1:${port}/plugins/sample-plugin/${encodeURIComponent("../../../../etc/passwd")}`);
 			assert.equal(res.status, 404);
 		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("proxies to a dev-server override instead of serving installed files", async () => {
+		const pluginsRoot = makeFixturePluginsRoot();
+		const devServer = createHttpServer((req, res) => {
+			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+			res.end("<p>dev server content</p>");
+		});
+		await new Promise((resolve) => devServer.listen(0, "127.0.0.1", resolve));
+		const devPort = devServer.address().port;
+		writeFileSync(
+			join(pluginsRoot, "dev-overrides.json"),
+			JSON.stringify({ "sample-plugin": `http://127.0.0.1:${devPort}` })
+		);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/plugins/sample-plugin/dist/index.html`);
+			assert.equal(res.status, 200);
+			assert.match(await res.text(), /dev server content/);
+		}, { pluginsRoot });
+		await new Promise((resolve) => devServer.close(resolve));
 		rmSync(pluginsRoot, { recursive: true, force: true });
 	});
 });
