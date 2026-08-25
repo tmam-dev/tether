@@ -738,11 +738,9 @@ git commit -m "feat(server): serve installed plugin assets at /plugins/:slug/*"
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `server/test/server.test.js`, inside (or after) the `describe("GET /plugins/:slug/*", ...)` block:
+Add `import { createServer as createHttpServer } from "node:http";` to the top of `server/test/server.test.js`, alongside its existing imports (not inline mid-file). Then add, inside (or after) the `describe("GET /plugins/:slug/*", ...)` block:
 
 ```js
-import { createServer as createHttpServer } from "node:http";
-
 test("proxies to a dev-server override instead of serving installed files", async () => {
 	const pluginsRoot = makeFixturePluginsRoot();
 	const devServer = createHttpServer((req, res) => {
