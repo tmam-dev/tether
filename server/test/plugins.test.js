@@ -1,0 +1,169 @@
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import {
+	TETHER_API_VERSION,
+	pluginsDir,
+	readManifest,
+	listInstalledPlugins,
+	resolvePluginAssetPath,
+	contentTypeFor,
+	readDevOverrides,
+	setDevOverride,
+} from "../dist/plugins.js";
+
+function withTempPluginsRoot(fn) {
+	const root = mkdtempSync(join(tmpdir(), "tether-plugins-test-"));
+	try {
+		return fn(root);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+}
+
+function installFixturePlugin(root, slug, overrides = {}) {
+	const dir = join(root, slug);
+	mkdirSync(dir, { recursive: true });
+	const manifest = {
+		name: "Sample Plugin",
+		slug,
+		version: "1.0.0",
+		author: "someone",
+		description: "A sample plugin.",
+		entry: "dist/index.html",
+		replaces: "detail",
+		tetherApiVersion: TETHER_API_VERSION,
+		...overrides,
+	};
+	writeFileSync(join(dir, "tether-plugin.json"), JSON.stringify(manifest));
+	mkdirSync(join(dir, "dist"), { recursive: true });
+	writeFileSync(join(dir, "dist", "index.html"), "<!doctype html><title>Sample</title>");
+	return dir;
+}
+
+describe("pluginsDir", () => {
+	test("joins 'plugins' onto the given data dir", () => {
+		assert.equal(pluginsDir("/tmp/tether-data"), join("/tmp/tether-data", "plugins"));
+	});
+});
+
+describe("readManifest", () => {
+	test("returns null when tether-plugin.json is missing", () => {
+		withTempPluginsRoot((root) => {
+			assert.equal(readManifest(join(root, "nope")), null);
+		});
+	});
+
+	test("returns null on malformed JSON", () => {
+		withTempPluginsRoot((root) => {
+			const dir = join(root, "broken");
+			mkdirSync(dir);
+			writeFileSync(join(dir, "tether-plugin.json"), "{not json");
+			assert.equal(readManifest(dir), null);
+		});
+	});
+
+	test("returns null when a required field is missing", () => {
+		withTempPluginsRoot((root) => {
+			const dir = join(root, "incomplete");
+			mkdirSync(dir);
+			writeFileSync(join(dir, "tether-plugin.json"), JSON.stringify({ name: "X" }));
+			assert.equal(readManifest(dir), null);
+		});
+	});
+
+	test("returns null when 'replaces' is not a recognized slot", () => {
+		withTempPluginsRoot((root) => {
+			const dir = installFixturePlugin(root, "bad-slot", { replaces: "sidebar" });
+			assert.equal(readManifest(dir), null);
+		});
+	});
+
+	test("parses a valid manifest", () => {
+		withTempPluginsRoot((root) => {
+			const dir = installFixturePlugin(root, "waterfall-view");
+			const manifest = readManifest(dir);
+			assert.equal(manifest.slug, "waterfall-view");
+			assert.equal(manifest.replaces, "detail");
+		});
+	});
+});
+
+describe("listInstalledPlugins", () => {
+	test("returns an empty list for a nonexistent plugins root", () => {
+		assert.deepEqual(listInstalledPlugins(join(tmpdir(), "does-not-exist-" + Date.now())), []);
+	});
+
+	test("lists installed plugins with a compatible flag", () => {
+		withTempPluginsRoot((root) => {
+			installFixturePlugin(root, "compatible-one");
+			installFixturePlugin(root, "incompatible-one", { tetherApiVersion: TETHER_API_VERSION + 1 });
+			const plugins = listInstalledPlugins(root);
+			assert.equal(plugins.length, 2);
+			const compatible = plugins.find((p) => p.slug === "compatible-one");
+			const incompatible = plugins.find((p) => p.slug === "incompatible-one");
+			assert.equal(compatible.compatible, true);
+			assert.equal(incompatible.compatible, false);
+		});
+	});
+
+	test("skips a directory with no valid manifest rather than throwing", () => {
+		withTempPluginsRoot((root) => {
+			mkdirSync(join(root, "junk"));
+			assert.deepEqual(listInstalledPlugins(root), []);
+		});
+	});
+});
+
+describe("resolvePluginAssetPath", () => {
+	test("resolves a real file inside the plugin's own directory", () => {
+		withTempPluginsRoot((root) => {
+			installFixturePlugin(root, "waterfall-view");
+			const resolved = resolvePluginAssetPath(root, "waterfall-view", "dist/index.html");
+			const expected = realpathSync(join(root, "waterfall-view", "dist", "index.html"));
+			assert.equal(resolved, expected);
+		});
+	});
+
+	test("returns null for a path traversal attempt", () => {
+		withTempPluginsRoot((root) => {
+			installFixturePlugin(root, "waterfall-view");
+			assert.equal(resolvePluginAssetPath(root, "waterfall-view", "../../etc/passwd"), null);
+		});
+	});
+
+	test("returns null for an unknown slug", () => {
+		withTempPluginsRoot((root) => {
+			assert.equal(resolvePluginAssetPath(root, "nope", "dist/index.html"), null);
+		});
+	});
+});
+
+describe("contentTypeFor", () => {
+	test("maps common extensions", () => {
+		assert.equal(contentTypeFor("dist/index.html"), "text/html; charset=utf-8");
+		assert.equal(contentTypeFor("dist/app.js"), "text/javascript; charset=utf-8");
+		assert.equal(contentTypeFor("dist/style.css"), "text/css; charset=utf-8");
+		assert.equal(contentTypeFor("dist/icon.svg"), "image/svg+xml");
+		assert.equal(contentTypeFor("dist/unknown.bin"), "application/octet-stream");
+	});
+});
+
+describe("dev overrides", () => {
+	test("readDevOverrides returns {} when no override file exists", () => {
+		withTempPluginsRoot((root) => {
+			assert.deepEqual(readDevOverrides(root), {});
+		});
+	});
+
+	test("setDevOverride writes then clears an override", () => {
+		withTempPluginsRoot((root) => {
+			setDevOverride(root, "waterfall-view", "http://localhost:5173");
+			assert.deepEqual(readDevOverrides(root), { "waterfall-view": "http://localhost:5173" });
+			setDevOverride(root, "waterfall-view", null);
+			assert.deepEqual(readDevOverrides(root), {});
+		});
+	});
+});
