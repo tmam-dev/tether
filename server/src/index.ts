@@ -8,6 +8,7 @@
 import { join } from "node:path";
 import { openDatabase, resolveDataDir } from "./db.js";
 import { createTetherServer } from "./server.js";
+import { runPluginCommand } from "./cli/plugin-commands.js";
 import { pluginsDir } from "./plugins.js";
 
 process.on("unhandledRejection", (err) => {
@@ -17,13 +18,22 @@ process.on("uncaughtException", (err) => {
 	console.error("Uncaught exception:", err);
 });
 
-const DEFAULT_PORT = 4319;
-const port = Number(process.env.TETHER_PORT ?? DEFAULT_PORT);
-const dbPath = join(resolveDataDir(), "tether.sqlite");
+async function main(): Promise<void> {
+	if (process.argv[2] === "plugin") {
+		const code = await runPluginCommand(process.argv.slice(3), resolveDataDir());
+		process.exit(code);
+	}
 
-const db = openDatabase(dbPath);
-const server = createTetherServer(db, { pluginsRoot: pluginsDir(resolveDataDir()) });
+	const DEFAULT_PORT = 4319;
+	const port = Number(process.env.TETHER_PORT ?? DEFAULT_PORT);
+	const dbPath = join(resolveDataDir(), "tether.sqlite");
 
-server.listen(port, "127.0.0.1", () => {
-	console.log(`trailai-tether ready at http://localhost:${port} (data: ${dbPath})`);
-});
+	const db = openDatabase(dbPath);
+	const server = createTetherServer(db, { pluginsRoot: pluginsDir(resolveDataDir()) });
+
+	server.listen(port, "127.0.0.1", () => {
+		console.log(`trailai-tether ready at http://localhost:${port} (data: ${dbPath})`);
+	});
+}
+
+main();
