@@ -20,6 +20,7 @@ import { renderHarnessBody } from "./templates/harness.js";
 import { renderAnalyticsBody } from "./templates/analytics.js";
 import { renderShell, renderNotFoundPanel } from "./templates/shell.js";
 import type { ShellState, ShellView } from "./templates/shell.js";
+import { resolvePluginAssetPath, contentTypeFor } from "./plugins.js";
 
 const APP_JS = readFileSync(fileURLToPath(new URL("./static/app.js", import.meta.url)), "utf-8");
 
@@ -100,7 +101,8 @@ function buildRail(db: Database.Database, active: string | undefined): string {
 	return renderRailBody(listRuns(db, 50), active, Date.now());
 }
 
-export function createTetherServer(db: Database.Database): Server {
+export function createTetherServer(db: Database.Database, options: { pluginsRoot: string }): Server {
+	const { pluginsRoot } = options;
 	return createServer(async (req, res) => {
 		const pathname = (req.url ?? "").split("?")[0];
 
@@ -266,6 +268,24 @@ export function createTetherServer(db: Database.Database): Server {
 			try {
 				res.writeHead(200, { "Content-Type": "application/json" });
 				res.end(JSON.stringify(getUsage(db)));
+			} catch (err) {
+				sendError(res, 500, (err as Error).message);
+			}
+			return;
+		}
+
+		const pluginAssetMatch = pathname.match(/^\/plugins\/([^/]+)\/(.+)$/);
+		if (req.method === "GET" && pluginAssetMatch) {
+			try {
+				const slug = decodeURIComponent(pluginAssetMatch[1]);
+				const assetPath = decodeURIComponent(pluginAssetMatch[2]);
+				const resolved = resolvePluginAssetPath(pluginsRoot, slug, assetPath);
+				if (!resolved) {
+					sendError(res, 404, "plugin asset not found");
+					return;
+				}
+				res.writeHead(200, { "Content-Type": contentTypeFor(resolved) });
+				res.end(readFileSync(resolved));
 			} catch (err) {
 				sendError(res, 500, (err as Error).message);
 			}

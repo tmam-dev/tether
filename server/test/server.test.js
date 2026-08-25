@@ -1,20 +1,28 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, rmSync, cpSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { openDatabase, countTraces } from "../dist/db.js";
 import { createTetherServer } from "../dist/server.js";
+
+function makeFixturePluginsRoot() {
+	const root = mkdtempSync(join(tmpdir(), "tether-plugins-fixture-"));
+	cpSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "sample-plugin"), join(root, "sample-plugin"), { recursive: true });
+	return root;
+}
 
 function makeTempDbPath() {
 	const dir = mkdtempSync(join(tmpdir(), "tether-server-test-"));
 	return join(dir, "test.sqlite");
 }
 
-async function withServer(fn) {
+async function withServer(fn, { pluginsRoot } = {}) {
 	const dbPath = makeTempDbPath();
 	const db = openDatabase(dbPath);
-	const server = createTetherServer(db);
+	const resolvedPluginsRoot = pluginsRoot ?? mkdtempSync(join(tmpdir(), "tether-plugins-empty-"));
+	const server = createTetherServer(db, { pluginsRoot: resolvedPluginsRoot });
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const port = server.address().port;
 	try {
@@ -23,6 +31,7 @@ async function withServer(fn) {
 		await new Promise((resolve) => server.close(resolve));
 		db.close();
 		rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		if (!pluginsRoot) rmSync(resolvedPluginsRoot, { recursive: true, force: true });
 	}
 }
 
@@ -538,5 +547,36 @@ describe("live repro: poisoned verdict no longer crashes any route (C1 + C2 comb
 				assert.equal(res.status, 200, `${path} should render 200, not crash`);
 			}
 		});
+	});
+});
+
+describe("GET /plugins/:slug/*", () => {
+	test("serves an installed plugin's file with the right content-type", async () => {
+		const pluginsRoot = makeFixturePluginsRoot();
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/plugins/sample-plugin/dist/index.html`);
+			assert.equal(res.status, 200);
+			assert.match(res.headers.get("content-type"), /text\/html/);
+			assert.match(await res.text(), /sample plugin content/);
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("404s for an unknown slug", async () => {
+		const pluginsRoot = makeFixturePluginsRoot();
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/plugins/nope/dist/index.html`);
+			assert.equal(res.status, 404);
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("404s a path-traversal attempt rather than serving a file outside the plugin dir", async () => {
+		const pluginsRoot = makeFixturePluginsRoot();
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/plugins/sample-plugin/${encodeURIComponent("../../../../etc/passwd")}`);
+			assert.equal(res.status, 404);
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
 	});
 });

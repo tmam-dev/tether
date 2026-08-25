@@ -8,6 +8,7 @@
 import { join } from "node:path";
 import { openDatabase, resolveDataDir } from "./db.js";
 import { createTetherServer } from "./server.js";
+import { pluginsDir } from "./plugins.js";
 
 process.on("unhandledRejection", (err) => {
 	console.error("Unhandled rejection:", err);
@@ -21,7 +22,7 @@ const port = Number(process.env.TETHER_PORT ?? DEFAULT_PORT);
 const dbPath = join(resolveDataDir(), "tether.sqlite");
 
 const db = openDatabase(dbPath);
-const server = createTetherServer(db);
+const server = createTetherServer(db, { pluginsRoot: pluginsDir(resolveDataDir()) });
 
 server.listen(port, "127.0.0.1", () => {
 	console.log(`trailai-tether ready at http://localhost:${port} (data: ${dbPath})`);
