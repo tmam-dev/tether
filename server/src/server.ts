@@ -228,6 +228,50 @@ export function createTetherServer(db: Database.Database): Server {
 			return;
 		}
 
+		if (req.method === "GET" && pathname.startsWith("/api/v1/runs/")) {
+			const traceId = decodeTraceIdOr400(pathname.slice("/api/v1/runs/".length), res);
+			if (traceId === null) return;
+			try {
+				const run = getRun(db, traceId);
+				if (!run) {
+					sendError(res, 404, "run not found");
+					return;
+				}
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ ...run, coverage: getCoverage(db, traceId) }));
+			} catch (err) {
+				sendError(res, 500, (err as Error).message);
+			}
+			return;
+		}
+
+		if (req.method === "GET" && pathname.startsWith("/api/v1/harness/")) {
+			const traceId = decodeTraceIdOr400(pathname.slice("/api/v1/harness/".length), res);
+			if (traceId === null) return;
+			try {
+				const view = getHarnessView(db, traceId);
+				if (!view) {
+					sendError(res, 404, "run not found");
+					return;
+				}
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify(view));
+			} catch (err) {
+				sendError(res, 500, (err as Error).message);
+			}
+			return;
+		}
+
+		if (req.method === "GET" && pathname === "/api/v1/analytics") {
+			try {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify(getUsage(db)));
+			} catch (err) {
+				sendError(res, 500, (err as Error).message);
+			}
+			return;
+		}
+
 		const harnessPathMatch = pathname.match(/^\/runs\/([^/]+)\/harness$/);
 		if (req.method === "GET" && harnessPathMatch) {
 			try {

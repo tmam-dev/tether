@@ -148,6 +148,55 @@ describe("POST /traces", () => {
 	});
 });
 
+describe("GET /api/v1/runs/:traceId", () => {
+	test("returns the run with coverage as JSON", async () => {
+		await withServer(async ({ db, port }) => {
+			await fetch(`http://127.0.0.1:${port}/traces`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(otlpPayload()),
+			});
+			const traceId = "a".repeat(32);
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/runs/${traceId}`);
+			assert.equal(res.status, 200);
+			assert.equal(res.headers.get("content-type"), "application/json");
+			const body = await res.json();
+			assert.equal(body.traceId, traceId);
+			assert.ok("coverage" in body);
+		});
+	});
+
+	test("404s with an error body for an unknown traceId", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/runs/${"z".repeat(32)}`);
+			assert.equal(res.status, 404);
+			const body = await res.json();
+			assert.equal(body.ok, false);
+		});
+	});
+});
+
+describe("GET /api/v1/harness/:traceId", () => {
+	test("404s for an unknown traceId", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/harness/${"z".repeat(32)}`);
+			assert.equal(res.status, 404);
+		});
+	});
+});
+
+describe("GET /api/v1/analytics", () => {
+	test("returns a UsageView shape on an empty store", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/analytics`);
+			assert.equal(res.status, 200);
+			const body = await res.json();
+			assert.equal(body.totalRuns, 0);
+			assert.deepEqual(body.entries, []);
+		});
+	});
+});
+
 describe("GET /app.js", () => {
 	test("serves the client router as JavaScript", async () => {
 		await withServer(async ({ port }) => {
