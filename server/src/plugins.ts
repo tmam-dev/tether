@@ -6,7 +6,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { extname, join, resolve, sep } from "node:path";
+import { basename, extname, join, resolve, sep } from "node:path";
 
 export const TETHER_API_VERSION = 1;
 
@@ -84,6 +84,8 @@ export function listInstalledPlugins(pluginsRoot: string): InstalledPlugin[] {
  * resolve outside it (path traversal via `..` or an absolute path). Returns null on any
  * violation, an unknown slug, or a target that doesn't exist -- never throws. */
 export function resolvePluginAssetPath(pluginsRoot: string, slug: string, requestedPath: string): string | null {
+	// Guard against path traversal in slug: reject if it contains separators or is "." or ".."
+	if (slug !== basename(slug) || slug === "." || slug === "..") return null;
 	const pluginDir = join(pluginsRoot, slug);
 	if (!existsSync(pluginDir)) return null;
 	const candidate = resolve(pluginDir, requestedPath);

@@ -139,6 +139,27 @@ describe("resolvePluginAssetPath", () => {
 			assert.equal(resolvePluginAssetPath(root, "nope", "dist/index.html"), null);
 		});
 	});
+
+	test("returns null for a slug containing path traversal segments", () => {
+		withTempPluginsRoot((root) => {
+			installFixturePlugin(root, "waterfall-view");
+			assert.equal(resolvePluginAssetPath(root, "../../../../etc", "passwd"), null);
+		});
+	});
+
+	test("returns null for a slug containing a literal forward slash", () => {
+		withTempPluginsRoot((root) => {
+			installFixturePlugin(root, "waterfall-view");
+			assert.equal(resolvePluginAssetPath(root, "foo/bar", "dist/index.html"), null);
+		});
+	});
+
+	test("returns null for a slug that is exactly '..'", () => {
+		withTempPluginsRoot((root) => {
+			installFixturePlugin(root, "waterfall-view");
+			assert.equal(resolvePluginAssetPath(root, "..", "dist/index.html"), null);
+		});
+	});
 });
 
 describe("contentTypeFor", () => {
