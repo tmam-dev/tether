@@ -117,6 +117,25 @@ describe("plugin add", () => {
 			rmSync(repoDir, { recursive: true, force: true });
 		});
 	});
+
+	test("sweeps a stale .tmp-install-* staging directory left behind by a prior crashed install", async () => {
+		await withDataDir(async (dataDir) => {
+			// Simulates a process kill mid-install: cleanupCloneTarget never runs, so the staging
+			// directory (which listInstalledPlugins/resolvePluginAssetPath already treat as invisible,
+			// since both refuse dot-prefixed names) is left behind in the plugins root.
+			mkdirSync(pluginsDir(dataDir), { recursive: true });
+			const stale = join(pluginsDir(dataDir), ".tmp-install-leftover");
+			mkdirSync(stale);
+			writeFileSync(join(stale, "marker"), "from a crashed install");
+
+			const repoDir = makeFixtureRepo("waterfall-view");
+			assert.equal(await runPluginCommand(["add", repoDir], dataDir), 0);
+
+			assert.equal(existsSync(stale), false);
+			assert.deepEqual(readdirSync(pluginsDir(dataDir)), ["waterfall-view"]);
+			rmSync(repoDir, { recursive: true, force: true });
+		});
+	});
 });
 
 describe("slug validation", () => {

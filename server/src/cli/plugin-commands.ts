@@ -6,7 +6,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, renameSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, renameSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { isPlainSlug, pluginsDir, readManifest, setDevOverride, TETHER_API_VERSION } from "../plugins.js";
 
@@ -17,6 +17,31 @@ function cleanupCloneTarget(cloneTarget: string): void {
 		rmSync(cloneTarget, { recursive: true, force: true });
 	} catch (err) {
 		console.error(`Warning: failed to clean up temp directory "${cloneTarget}": ${(err as Error).message}`);
+	}
+}
+
+/** Removes any `.tmp-install-*` staging directory left behind under `root` -- normally cleaned up
+ * by `cleanupCloneTarget` on every failure path, but a process kill (SIGKILL, a crash) mid-install
+ * skips that cleanup entirely. These are already invisible to `listInstalledPlugins` and
+ * unservable by `resolvePluginAssetPath` (both refuse dot-prefixed names), so a leftover one is
+ * inert disk usage, not a correctness or security issue -- this just stops it from accumulating.
+ * Best-effort: a sweep failure is not a reason to fail the install that triggered it. */
+function sweepStaleInstallDirs(root: string): void {
+	let entries: string[];
+	try {
+		entries = readdirSync(root);
+	} catch {
+		return;
+	}
+	for (const name of entries) {
+		if (!name.startsWith(".tmp-install-")) continue;
+		try {
+			rmSync(join(root, name), { recursive: true, force: true });
+		} catch {
+			/* best effort -- an install in progress under this exact name is vanishingly unlikely
+			 * given plugin add isn't expected to run concurrently with itself, and even then the
+			 * worst case is this sweep skipping that one directory, not corrupting it. */
+		}
 	}
 }
 
@@ -43,6 +68,7 @@ function addPlugin(gitUrl: string, dataDir: string): number {
 		// mode 0o700 matches db.ts's data-directory convention (the data dir holds prompts and
 		// model outputs). Ignored if the directory already exists, so every creator must agree.
 		mkdirSync(root, { recursive: true, mode: 0o700 });
+		sweepStaleInstallDirs(root);
 		cloneTarget = mkdtempSync(join(root, ".tmp-install-"));
 	} catch (err) {
 		console.error(`Failed to prepare the plugins directory: ${(err as Error).message}`);

@@ -12,6 +12,15 @@ export const TETHER_API_VERSION = 1;
 
 const REPLACES_SLOTS = new Set(["detail", "harness", "analytics"]);
 
+// isPlainSlug also refuses these outright: readDevOverrides already installs entries via
+// defineProperty so `overrides[slug]` can never resolve to something inherited from
+// Object.prototype, but setDevOverride's write side (`overrides[slug] = url`) is a plain
+// assignment -- on a plain object, assigning to "__proto__" changes the prototype instead of
+// creating an own property, silently discarding the value rather than storing it. Rejecting these
+// names at the one shared validation point means no plugin can ever be installed under one, so the
+// write side never has to reason about it either.
+const RESERVED_SLUGS = new Set(["__proto__", "constructor", "prototype"]);
+
 export interface PluginManifest {
 	name: string;
 	slug: string;
@@ -40,11 +49,14 @@ export function pluginsDir(dataDir: string): string {
  * `/plugins/:slug/*` asset route (whose slug comes off the URL). Rejects anything containing a
  * path separator (so `join` can't escape the plugins root), `.`/`..`, the empty string, and any
  * dot-prefixed name -- the latter both because a hidden plugin directory is meaningless and
- * because `.tmp-install-*` is reserved for `plugin add`'s staging directories. */
+ * because `.tmp-install-*` is reserved for `plugin add`'s staging directories -- and a handful of
+ * JS-prototype-related names (see RESERVED_SLUGS) that are safe as directory names but confusing
+ * or silently-wrong as object keys elsewhere in this module. */
 export function isPlainSlug(slug: string): boolean {
 	if (typeof slug !== "string" || slug === "") return false;
 	if (slug.includes("/") || slug.includes("\\") || slug.includes("\0")) return false;
 	if (slug !== basename(slug)) return false;
+	if (RESERVED_SLUGS.has(slug)) return false;
 	return !slug.startsWith(".");
 }
 

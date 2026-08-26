@@ -665,6 +665,64 @@ describe("GET /plugins/:slug/*", () => {
 		await new Promise((resolve) => devServer.close(resolve));
 		rmSync(pluginsRoot, { recursive: true, force: true });
 	});
+
+	test("forwards a same-path-relative Location from the dev server", async () => {
+		const pluginsRoot = makeFixturePluginsRoot();
+		const devServer = createHttpServer((req, res) => {
+			res.writeHead(302, { Location: "/index.html" });
+			res.end();
+		});
+		await new Promise((resolve) => devServer.listen(0, "127.0.0.1", resolve));
+		writeFileSync(
+			join(pluginsRoot, "dev-overrides.json"),
+			JSON.stringify({ "sample-plugin": `http://127.0.0.1:${devServer.address().port}` })
+		);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/plugins/sample-plugin/dist/index.html`, { redirect: "manual" });
+			assert.equal(res.status, 302);
+			assert.equal(res.headers.get("location"), "/index.html");
+		}, { pluginsRoot });
+		await new Promise((resolve) => devServer.close(resolve));
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("does not forward a Location naming a different origin from the dev server", async () => {
+		const pluginsRoot = makeFixturePluginsRoot();
+		const devServer = createHttpServer((req, res) => {
+			res.writeHead(302, { Location: "http://evil.com/phish" });
+			res.end();
+		});
+		await new Promise((resolve) => devServer.listen(0, "127.0.0.1", resolve));
+		writeFileSync(
+			join(pluginsRoot, "dev-overrides.json"),
+			JSON.stringify({ "sample-plugin": `http://127.0.0.1:${devServer.address().port}` })
+		);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/plugins/sample-plugin/dist/index.html`, { redirect: "manual" });
+			assert.equal(res.status, 302);
+			assert.equal(res.headers.get("location"), null);
+		}, { pluginsRoot });
+		await new Promise((resolve) => devServer.close(resolve));
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("returns a clean 502 instead of hanging when the dev server drops the connection with no response", async () => {
+		const pluginsRoot = makeFixturePluginsRoot();
+		const devServer = createHttpServer((req) => {
+			req.socket.destroy();
+		});
+		await new Promise((resolve) => devServer.listen(0, "127.0.0.1", resolve));
+		writeFileSync(
+			join(pluginsRoot, "dev-overrides.json"),
+			JSON.stringify({ "sample-plugin": `http://127.0.0.1:${devServer.address().port}` })
+		);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/plugins/sample-plugin/dist/index.html`);
+			assert.equal(res.status, 502);
+		}, { pluginsRoot });
+		await new Promise((resolve) => devServer.close(resolve));
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
 });
 
 describe("plugin picker wiring", () => {

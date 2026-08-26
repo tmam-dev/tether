@@ -51,4 +51,10 @@ async function main(): Promise<void> {
 	});
 }
 
-main();
+// Without this .catch, a synchronous throw anywhere in main() (e.g. openDatabase, mkdtempSync)
+// becomes an unhandled rejection -- process.on("unhandledRejection") above only logs it, so the
+// process would exit 0 despite having failed, silently reporting success on a genuine failure.
+main().catch((err) => {
+	console.error(err);
+	process.exit(1);
+});

@@ -12,6 +12,7 @@ import {
 	contentTypeFor,
 	readDevOverrides,
 	setDevOverride,
+	isPlainSlug,
 } from "../dist/plugins.js";
 
 function withTempPluginsRoot(fn) {
@@ -159,6 +160,34 @@ describe("resolvePluginAssetPath", () => {
 			installFixturePlugin(root, "waterfall-view");
 			assert.equal(resolvePluginAssetPath(root, "..", "dist/index.html"), null);
 		});
+	});
+
+	test("returns null for a reserved slug even if a directory with that name exists", () => {
+		withTempPluginsRoot((root) => {
+			installFixturePlugin(root, "__proto__");
+			assert.equal(resolvePluginAssetPath(root, "__proto__", "dist/index.html"), null);
+		});
+	});
+});
+
+describe("isPlainSlug", () => {
+	test("accepts an ordinary slug", () => {
+		assert.equal(isPlainSlug("waterfall-view"), true);
+	});
+
+	test("rejects '__proto__', 'constructor', and 'prototype'", () => {
+		// These are safe as directory names but silently wrong as plain-object keys elsewhere in
+		// this module (setDevOverride's `overrides[slug] = url` assignment): rejecting them here,
+		// the single shared validation point, means a plugin can never be installed under one.
+		assert.equal(isPlainSlug("__proto__"), false);
+		assert.equal(isPlainSlug("constructor"), false);
+		assert.equal(isPlainSlug("prototype"), false);
+	});
+
+	test("rejects a dot-prefixed name, an empty string, and a non-string", () => {
+		assert.equal(isPlainSlug(".tmp-install-abc123"), false);
+		assert.equal(isPlainSlug(""), false);
+		assert.equal(isPlainSlug(undefined), false);
 	});
 });
 

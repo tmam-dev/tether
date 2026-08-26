@@ -137,6 +137,22 @@ const PROXY_SAFE_RESPONSE_HEADERS = new Set([
 	"vary",
 ]);
 
+/** True for a `Location` value safe to forward from a dev-server response: a same-path-relative
+ * reference, never anything that names a different authority. A dev server's own redirects (e.g.
+ * a directory route redirecting to its `index.html`) are common enough in local dev tooling that
+ * dropping `Location` outright (the original, simpler fix) leaves `plugin dev` rendering blank on
+ * a redirecting dev server -- but forwarding it unconditionally would let a compromised or
+ * malicious dev server redirect the browser to an attacker-chosen origin while still under
+ * Tether's own page. Rejects a scheme (`http:`, `javascript:`, ...), a protocol-relative
+ * `//host/...` authority, and a backslash (which some browsers normalize to `/`, the same class
+ * of trick `proxyGet`'s asset-path check already guards against). */
+function isSafeRelativeRedirect(value: string): boolean {
+	if (value.includes("\\")) return false;
+	if (value.startsWith("//")) return false;
+	if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)) return false;
+	return true;
+}
+
 /** Proxies a GET for `assetPath` under `targetBase` and pipes the response straight through to
  * `res`. Used only for plugin dev-mode overrides (§3.2/§3.4 of the plugin spec) -- keeps the
  * iframe's fetches to /api/v1/* same-origin even while the plugin's own assets are served by a
@@ -164,15 +180,33 @@ function proxyGet(targetBase: string, assetPath: string, res: ServerResponse): v
 	const proxyReq = httpRequest(
 		{ protocol: target.protocol, hostname: target.hostname, port: target.port, path: target.pathname + target.search, method: "GET" },
 		(proxyRes) => {
+			// A socket error after the response has started arriving (the dev server dropping the
+			// connection mid-stream, e.g. during its own hot-reload restart) is a separate event from
+			// proxyReq's -- with no listener here it would be an unhandled 'error' event, which Node
+			// throws synchronously. index.ts's uncaughtException handler keeps the process alive
+			// either way, but this leaves the response cleanly ended instead of hanging.
+			proxyRes.on("error", () => {
+				if (!res.headersSent) sendError(res, 502, "dev server connection error");
+				else res.destroy();
+			});
 			const headers: Record<string, string> = {};
 			for (const [name, value] of Object.entries(proxyRes.headers)) {
-				if (!PROXY_SAFE_RESPONSE_HEADERS.has(name.toLowerCase()) || value === undefined) continue;
-				headers[name] = Array.isArray(value) ? value.join(", ") : value;
+				if (value === undefined) continue;
+				const lower = name.toLowerCase();
+				if (PROXY_SAFE_RESPONSE_HEADERS.has(lower)) {
+					headers[name] = Array.isArray(value) ? value.join(", ") : value;
+				} else if (lower === "location" && typeof value === "string" && isSafeRelativeRedirect(value)) {
+					headers[name] = value;
+				}
 			}
 			res.writeHead(proxyRes.statusCode ?? 502, headers);
 			proxyRes.pipe(res);
 		}
 	);
+	// A dev server that never responds (hung, or mid-restart) would otherwise leave the request
+	// pending indefinitely; destroying it here routes through the same "dev server unreachable"
+	// error handler below rather than adding a second error path.
+	proxyReq.setTimeout(10_000, () => proxyReq.destroy());
 	proxyReq.on("error", () => sendError(res, 502, "dev server unreachable"));
 	proxyReq.end();
 }
