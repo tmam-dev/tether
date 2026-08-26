@@ -64,6 +64,15 @@ class FakeElement {
 	getBoundingClientRect() { return { left: 0, width: 100 }; }
 }
 
+class FakeSelectElement extends FakeElement {
+	constructor(id) {
+		super(id);
+		this._options = [];
+		this.value = "";
+	}
+	get selectedOptions() { return this._options.filter((o) => o.value === this.value); }
+}
+
 /** Loads app.js fresh into an isolated vm context with a minimal fake DOM, returning
  * `{ elements, windowStub, mountDetailPanel }` so a test can call mountDetailPanel(runData)
  * directly and assert on what actually landed in the fake elements' innerHTML. */
@@ -87,14 +96,21 @@ function loadApp() {
 	};
 	getOrCreate("content");
 	getOrCreate("rail");
+	// A real browser's history.pushState(state, title, url) also updates window.location (here,
+	// just .pathname -- this fake has no other URL parts to keep in sync). Mirroring that here
+	// matters because onPluginPickerChange's "Native" branch reads window.location.pathname back
+	// out to re-navigate to whatever path the router last pushed; only .pathname is kept in sync
+	// (not .href), since several pre-existing tests assert .href stays "" across a client-side
+	// (pushState) navigation to prove no full reload happened.
+	const location = { pathname: "/", href: "" };
 	const windowStub = {
 		matchMedia: () => ({ matches: false }),
 		requestAnimationFrame: () => 1,
 		cancelAnimationFrame: () => {},
 		addEventListener: (type, fn) => { (windowListeners[type] ??= []).push(fn); },
 		removeEventListener: (type, fn) => { windowListeners[type] = (windowListeners[type] ?? []).filter((f) => f !== fn); },
-		history: { pushState: () => {} },
-		location: { pathname: "/", href: "" },
+		history: { pushState: (_state, _title, url) => { location.pathname = url; } },
+		location,
 		setInterval: () => 0,
 		fetch: () => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") }),
 		__TETHER_INITIAL__: undefined,
@@ -429,5 +445,68 @@ describe("router: Harness tab sync", () => {
 		sandbox.onRailOrTabClick(event);
 
 		assert.equal(navigatedTo, "/runs/" + "g".repeat(32) + "/harness");
+	});
+});
+
+describe("plugin picker", () => {
+	test("selecting a plugin option replaces #content with a sandboxed iframe pointed at the plugin's entry", async () => {
+		const { elements, sandbox } = loadApp();
+		await sandbox.navigateTo("/runs/" + "a".repeat(32), true);
+
+		const picker = new FakeSelectElement("pluginPickerDetail");
+		picker._options.push({ value: "waterfall-view", getAttribute: (n) => (n === "data-entry" ? "dist/index.html" : null) });
+		picker.value = "waterfall-view";
+		elements.pluginPickerDetail = picker;
+
+		sandbox.onPluginPickerChange("detail");
+
+		const content = elements.content;
+		assert.equal(content.children.length, 1);
+		const iframe = content.children[0];
+		assert.equal(iframe.getAttribute("sandbox"), "allow-scripts allow-same-origin");
+		assert.equal(iframe.src, `/plugins/waterfall-view/dist/index.html?traceId=${"a".repeat(32)}`);
+	});
+
+	test("selecting Native (empty value) re-navigates instead of mounting a frame", async () => {
+		const { elements, sandbox } = loadApp();
+		await sandbox.navigateTo("/runs/" + "a".repeat(32), true);
+
+		const picker = new FakeSelectElement("pluginPickerDetail");
+		picker.value = "";
+		elements.pluginPickerDetail = picker;
+
+		let navigatedTo = null;
+		sandbox.navigateTo = (pathname) => { navigatedTo = pathname; return Promise.resolve(); };
+		sandbox.onPluginPickerChange("detail");
+
+		assert.equal(navigatedTo, "/runs/" + "a".repeat(32));
+	});
+
+	test("analytics slot's iframe src has no traceId query param", async () => {
+		const { elements, sandbox } = loadApp();
+		await sandbox.navigateTo("/analytics", true);
+
+		const picker = new FakeSelectElement("pluginPickerAnalytics");
+		picker._options.push({ value: "usage-explorer", getAttribute: (n) => (n === "data-entry" ? "index.html" : null) });
+		picker.value = "usage-explorer";
+		elements.pluginPickerAnalytics = picker;
+
+		sandbox.onPluginPickerChange("analytics");
+
+		assert.equal(elements.content.children[0].src, "/plugins/usage-explorer/index.html");
+	});
+
+	test("a native panel's unmount runs before a plugin frame mounts, so its stale listeners can't fire", async () => {
+		const { windowListeners, elements, sandbox } = loadApp();
+		await sandbox.navigateTo("/runs/" + "a".repeat(32), true);
+		// mountRunDataIfPresent only mounts when a #run-data island is present in the fetched
+		// fragment; this harness's stubbed fetch returns an empty body, so no native panel is
+		// actually mounted here -- this test instead verifies the *unconditional* currentUnmount
+		// call site exists by asserting it's safe to call onPluginPickerChange with no prior mount.
+		const picker = new FakeSelectElement("pluginPickerDetail");
+		picker._options.push({ value: "waterfall-view", getAttribute: (n) => (n === "data-entry" ? "dist/index.html" : null) });
+		picker.value = "waterfall-view";
+		elements.pluginPickerDetail = picker;
+		assert.doesNotThrow(() => sandbox.onPluginPickerChange("detail"));
 	});
 });

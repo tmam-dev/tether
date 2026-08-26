@@ -379,6 +379,43 @@ function setRailActive(traceId: string | null): void {
 	});
 }
 
+const PLUGIN_PICKER_IDS: Record<ShellState["view"], string> = {
+	detail: "pluginPickerDetail",
+	harness: "pluginPickerHarness",
+	analytics: "pluginPickerAnalytics",
+};
+
+function setPluginPickerVisibility(view: ShellState["view"]): void {
+	(Object.keys(PLUGIN_PICKER_IDS) as Array<ShellState["view"]>).forEach((slot) => {
+		const el = document.getElementById(PLUGIN_PICKER_IDS[slot]) as HTMLSelectElement | null;
+		if (!el) return;
+		el.style.display = slot === view ? "" : "none";
+		el.value = "";
+	});
+}
+
+function mountPluginFrame(slug: string, entry: string, slot: ShellState["view"]): void {
+	const iframe = document.createElement("iframe") as HTMLIFrameElement;
+	iframe.className = "plugin-frame";
+	iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+	const query = slot === "analytics" ? "" : `?traceId=${encodeURIComponent(currentState.traceId ?? "")}`;
+	iframe.src = `/plugins/${encodeURIComponent(slug)}/${entry}${query}`;
+	const content = $("content");
+	content.innerHTML = "";
+	content.appendChild(iframe);
+}
+
+function onPluginPickerChange(slot: ShellState["view"]): void {
+	const select = document.getElementById(PLUGIN_PICKER_IDS[slot]) as HTMLSelectElement | null;
+	if (!select) return;
+	if (currentUnmount) { currentUnmount(); currentUnmount = null; }
+	const slug = select.value;
+	if (slug === "") { navigateTo(window.location.pathname, false); return; }
+	const option = select.selectedOptions[0];
+	const entry = option?.getAttribute("data-entry") ?? "";
+	mountPluginFrame(slug, entry, slot);
+}
+
 // Invariant that must hold on both this client-updated version and shell.ts's topbar()'s
 // server-rendered version: no `href` attribute on the Harness tab iff aria-disabled="true".
 // onRailOrTabClick's disabled check and any code doing `new URL(anchor.href)` on this tab depend
@@ -470,6 +507,7 @@ async function navigateTo(pathname: string, push: boolean): Promise<void> {
 	setTabActive(target.view);
 	setRailActive(target.view === "analytics" ? null : resolvedTraceId);
 	updateHarnessTab(target.view === "analytics" ? null : resolvedTraceId);
+	setPluginPickerVisibility(target.view);
 	if (push) window.history.pushState(null, "", pathname);
 }
 
@@ -512,8 +550,12 @@ function init(): void {
 	window.addEventListener("popstate", onPopState);
 	initThemeToggle();
 	window.setInterval(pollRail, 5000);
+	(Object.keys(PLUGIN_PICKER_IDS) as Array<ShellState["view"]>).forEach((slot) => {
+		document.getElementById(PLUGIN_PICKER_IDS[slot])?.addEventListener("change", () => onPluginPickerChange(slot));
+	});
 
 	if (currentState.view === "detail") mountRunDataIfPresent();
+	setPluginPickerVisibility(currentState.view);
 }
 
 init();
