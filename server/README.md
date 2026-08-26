@@ -55,6 +55,61 @@ claude mcp add trail -- npx -y trailai-mcp
   `/app.js`) is progressive enhancement over the server routes, not a
   replacement for them.
 
+## Plugins
+
+A plugin is an alternative *view* for one of the three slots above — a
+third-party Detail, Harness, or Analytics panel. It's a plain static web
+page (any framework, any build tool), published as a git repo, installed
+locally, and mounted in an iframe in place of the native panel, with the
+run's `traceId` handed to it on the iframe URL's query string.
+
+**Trust model, stated plainly:** the iframe is same-origin and its scripts
+run, so an installed plugin has the host page's full privileges — it can
+reach `window.parent` and read everything the `/api/v1/*` routes expose
+(every prompt, model output, and verdict in your local store). The
+`sandbox` attribute on the frame is a consistency convention, not a
+security boundary. Install a plugin the way you'd `npm install` a package:
+only if you trust the repo you're pointing at.
+
+```bash
+npx trailai-tether plugin add <git-url>   # clone + validate into <data-dir>/plugins/<slug>/
+npx trailai-tether plugin dev <slug> [url]  # serve that slug's assets from a dev server (omit url to clear)
+npx trailai-tether plugin remove <slug>   # delete the plugin and clear any dev override
+```
+
+`plugin dev` is the authoring loop: point a slug at e.g.
+`http://localhost:5173` and Tether proxies `/plugins/<slug>/*` to your dev
+server, so hot reload works while the plugin's `fetch` calls stay
+same-origin.
+
+### `tether-plugin.json` (plugin repo root)
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | yes | Display name, shown in the slot's picker. |
+| `slug` | yes | Directory name and URL segment — one plain path segment, no separators. |
+| `version` | yes | The plugin's own version string; Tether doesn't interpret it. |
+| `author` | yes | Free-form author string. |
+| `description` | yes | One-line description of the view. |
+| `entry` | yes | Path (relative to the repo root) of the HTML file the iframe loads. |
+| `replaces` | yes | Exactly one of `detail`, `harness`, `analytics`. |
+| `tetherApiVersion` | yes | The plugin API version this targets — currently `1`. A mismatch leaves the plugin installed but skipped, with a warning on install and on every server startup. |
+| `icon` | no | Path to an icon in the repo. |
+
+### What a plugin can read
+
+Three read-only JSON endpoints, same-origin, no auth, versioned by URL
+prefix (a breaking change would ship as `/api/v2/*`):
+
+- `GET /api/v1/runs/:traceId` — the run: goal, verdict, steps, cost/tokens,
+  plus `coverage` (which harness manifest entries the run touched).
+- `GET /api/v1/harness/:traceId` — that run's harness: skills, sub-agents,
+  MCP servers.
+- `GET /api/v1/analytics` — usage aggregated across every run in the store.
+
+Unknown `traceId` gives a 404 with `{ "ok": false, "error": "..." }`.
+Nothing here writes: a plugin cannot mutate the trace store.
+
 ## Building from source
 
 ```bash

@@ -29,6 +29,13 @@ router — no bundler/framework):
 - Usage analytics (flags registered-but-never-used "dead weight" across
   all runs)
 
+On top of that shell, the plugin view system now ships too: a third-party
+plugin (a git repo with a `tether-plugin.json`, installed via
+`npx trailai-tether plugin add|dev|remove`) can replace any one of those
+three slots with its own iframe view, fed by the new read-only
+`/api/v1/runs/:traceId`, `/api/v1/harness/:traceId`, and `/api/v1/analytics`
+JSON routes — see `server/README.md`'s "Plugins" section.
+
 `README.md`'s "Status" section predates this and undersells it (still
 describes a placeholder-page server) — trust this file and the specs/plans
 below over that paragraph until someone updates it.
