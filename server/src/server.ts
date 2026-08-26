@@ -19,8 +19,8 @@ import { renderRailBody } from "./templates/rail.js";
 import { renderHarnessBody } from "./templates/harness.js";
 import { renderAnalyticsBody } from "./templates/analytics.js";
 import { renderShell, renderNotFoundPanel } from "./templates/shell.js";
-import type { ShellState, ShellView } from "./templates/shell.js";
-import { resolvePluginAssetPath, contentTypeFor, readDevOverrides } from "./plugins.js";
+import type { ShellState, ShellView, PluginOption } from "./templates/shell.js";
+import { resolvePluginAssetPath, contentTypeFor, readDevOverrides, listInstalledPlugins } from "./plugins.js";
 
 const APP_JS = readFileSync(fileURLToPath(new URL("./static/app.js", import.meta.url)), "utf-8");
 
@@ -84,11 +84,17 @@ function decodeTraceIdOr400(raw: string, res: ServerResponse): string | null {
  * a malformed one -- consistent with how these routes already give a well-formed-but-unknown
  * traceId a shell-wrapped 404, rather than decodeTraceIdOr400's bare JSON (which is correct only
  * for the /fragments/* routes, since those already return raw fragment bodies, not full pages). */
-function decodeTraceIdOrShellError(raw: string, res: ServerResponse, db: Database.Database, view: ShellView): string | null {
+function decodeTraceIdOrShellError(
+	raw: string,
+	res: ServerResponse,
+	db: Database.Database,
+	view: ShellView,
+	pluginsRoot: string
+): string | null {
 	try {
 		return decodeURIComponent(raw);
 	} catch {
-		const body = renderShell({ view }, "Tether — Run not found", buildRail(db, undefined), renderNotFoundPanel());
+		const body = renderShell({ view }, "Tether — Run not found", buildRail(db, undefined), renderNotFoundPanel(), pluginsBySlot(pluginsRoot));
 		res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
 		res.end(body);
 		return null;
@@ -99,6 +105,20 @@ function decodeTraceIdOrShellError(raw: string, res: ServerResponse, db: Databas
  * `renderRailBody(listRuns(db, 50), active, Date.now())` call several routes below need. */
 function buildRail(db: Database.Database, active: string | undefined): string {
 	return renderRailBody(listRuns(db, 50), active, Date.now());
+}
+
+/** Every compatible installed plugin under `pluginsRoot`, grouped by the shell slot it
+ * replaces -- the shape `renderShell`'s picker expects. Incompatible plugins (a manifest's
+ * `tetherApiVersion` mismatching `TETHER_API_VERSION`) are silently excluded, same as the
+ * plugin-commands CLI does. */
+function pluginsBySlot(pluginsRoot: string): Record<"detail" | "harness" | "analytics", PluginOption[]> {
+	const compatible = listInstalledPlugins(pluginsRoot).filter((p) => p.compatible);
+	const toOption = (p: (typeof compatible)[number]): PluginOption => ({ slug: p.slug, name: p.name, entry: p.entry });
+	return {
+		detail: compatible.filter((p) => p.replaces === "detail").map(toOption),
+		harness: compatible.filter((p) => p.replaces === "harness").map(toOption),
+		analytics: compatible.filter((p) => p.replaces === "analytics").map(toOption),
+	};
 }
 
 /** Proxies a GET request to `targetBase + path` and pipes the response straight through to `res`.
@@ -314,18 +334,18 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 		const harnessPathMatch = pathname.match(/^\/runs\/([^/]+)\/harness$/);
 		if (req.method === "GET" && harnessPathMatch) {
 			try {
-				const traceId = decodeTraceIdOrShellError(harnessPathMatch[1], res, db, "harness");
+				const traceId = decodeTraceIdOrShellError(harnessPathMatch[1], res, db, "harness", pluginsRoot);
 				if (traceId === null) return;
 				const rail = buildRail(db, traceId);
 				const view = getHarnessView(db, traceId);
 				const state: ShellState = { view: "harness", traceId };
 				if (!view) {
-					const body = renderShell(state, "Tether — Run not found", rail, renderNotFoundPanel());
+					const body = renderShell(state, "Tether — Run not found", rail, renderNotFoundPanel(), pluginsBySlot(pluginsRoot));
 					res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
 					res.end(body);
 					return;
 				}
-				const body = renderShell(state, "Tether — Harness", rail, renderHarnessBody(view));
+				const body = renderShell(state, "Tether — Harness", rail, renderHarnessBody(view), pluginsBySlot(pluginsRoot));
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 				res.end(body);
 			} catch (err) {
@@ -342,14 +362,14 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 				if (pathname === "/") {
 					traceId = runs[0]?.traceId ?? null;
 				} else {
-					const decoded = decodeTraceIdOrShellError(detailPathMatch![1], res, db, "detail");
+					const decoded = decodeTraceIdOrShellError(detailPathMatch![1], res, db, "detail", pluginsRoot);
 					if (decoded === null) return;
 					traceId = decoded;
 				}
 
 				const rail = renderRailBody(runs, traceId ?? undefined, Date.now());
 				if (traceId === null) {
-					const body = renderShell({ view: "detail" }, "Tether", rail, renderEmptyDetailPanel());
+					const body = renderShell({ view: "detail" }, "Tether", rail, renderEmptyDetailPanel(), pluginsBySlot(pluginsRoot));
 					res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 					res.end(body);
 					return;
@@ -358,12 +378,18 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 				const run = getRun(db, traceId);
 				const state: ShellState = { view: "detail", traceId };
 				if (!run) {
-					const body = renderShell(state, "Tether — Run not found", rail, renderNotFoundPanel());
+					const body = renderShell(state, "Tether — Run not found", rail, renderNotFoundPanel(), pluginsBySlot(pluginsRoot));
 					res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
 					res.end(body);
 					return;
 				}
-				const body = renderShell(state, `Tether — ${run.goal}`, rail, renderDetailFragment(run, getCoverage(db, traceId)));
+				const body = renderShell(
+					state,
+					`Tether — ${run.goal}`,
+					rail,
+					renderDetailFragment(run, getCoverage(db, traceId)),
+					pluginsBySlot(pluginsRoot)
+				);
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 				res.end(body);
 			} catch (err) {
@@ -375,7 +401,13 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 		if (req.method === "GET" && pathname === "/analytics") {
 			try {
 				const rail = buildRail(db, undefined);
-				const body = renderShell({ view: "analytics" }, "Tether — Analytics", rail, renderAnalyticsBody(getUsage(db)));
+				const body = renderShell(
+					{ view: "analytics" },
+					"Tether — Analytics",
+					rail,
+					renderAnalyticsBody(getUsage(db)),
+					pluginsBySlot(pluginsRoot)
+				);
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 				res.end(body);
 			} catch (err) {

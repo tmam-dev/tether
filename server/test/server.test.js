@@ -602,3 +602,26 @@ describe("GET /plugins/:slug/*", () => {
 		rmSync(pluginsRoot, { recursive: true, force: true });
 	});
 });
+
+describe("plugin picker wiring", () => {
+	test("GET / includes the picker for a compatible installed detail plugin", async () => {
+		const pluginsRoot = makeFixturePluginsRoot(); // sample-plugin, replaces: "detail", from Task 3
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/`);
+			const html = await res.text();
+			assert.match(html, /data-plugin-slot="detail"/);
+			assert.match(html, /Sample Plugin/);
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("GET /analytics does not show the detail plugin's picker", async () => {
+		const pluginsRoot = makeFixturePluginsRoot();
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/analytics`);
+			const html = await res.text();
+			assert.doesNotMatch(html, /data-plugin-slot="analytics"/); // no analytics plugin installed
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+});
