@@ -497,16 +497,30 @@ describe("plugin picker", () => {
 	});
 
 	test("a native panel's unmount runs before a plugin frame mounts, so its stale listeners can't fire", async () => {
-		const { windowListeners, elements, sandbox } = loadApp();
+		const { windowListeners, elements, windowStub, sandbox } = loadApp();
+		// Seed the fetch stub with a real #run-data island (same technique as the "navigating away
+		// from a mounted detail view unmounts it" router test above) so navigateTo actually mounts a
+		// live native detail panel via mountRunDataIfPresent()/mountDetailPanel(...), registering its
+		// window mousemove/mouseup listeners for real -- not an empty body that never mounts anything.
+		const detailHtml = '<script type="application/json" id="run-data">' + JSON.stringify({ traceId: "a".repeat(32), goal: "g", agent: "a", verdict: "unjudged", score: null, narrative: null, totals: { dur: "1s", cost: null, tokens: null, steps: 0 }, steps: [], coverage: null }) + "</script>";
+		windowStub.fetch = () => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(detailHtml) });
+
 		await sandbox.navigateTo("/runs/" + "a".repeat(32), true);
-		// mountRunDataIfPresent only mounts when a #run-data island is present in the fetched
-		// fragment; this harness's stubbed fetch returns an empty body, so no native panel is
-		// actually mounted here -- this test instead verifies the *unconditional* currentUnmount
-		// call site exists by asserting it's safe to call onPluginPickerChange with no prior mount.
+		// Confirms the native panel really is mounted and live before the plugin picker is touched.
+		assert.equal((windowListeners.mousemove ?? []).length, 1);
+		assert.equal((windowListeners.mouseup ?? []).length, 1);
+
 		const picker = new FakeSelectElement("pluginPickerDetail");
 		picker._options.push({ value: "waterfall-view", getAttribute: (n) => (n === "data-entry" ? "dist/index.html" : null) });
 		picker.value = "waterfall-view";
 		elements.pluginPickerDetail = picker;
-		assert.doesNotThrow(() => sandbox.onPluginPickerChange("detail"));
+		sandbox.onPluginPickerChange("detail");
+
+		// currentUnmount() must have run before the plugin frame mounted -- otherwise the native
+		// panel's stale listeners would still be registered even though its DOM is gone.
+		assert.equal((windowListeners.mousemove ?? []).length, 0);
+		assert.equal((windowListeners.mouseup ?? []).length, 0);
+		assert.equal(elements.content.children.length, 1);
+		assert.equal(elements.content.children[0].src, `/plugins/waterfall-view/dist/index.html?traceId=${"a".repeat(32)}`);
 	});
 });
