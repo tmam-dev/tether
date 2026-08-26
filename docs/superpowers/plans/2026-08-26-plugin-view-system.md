@@ -1175,6 +1175,7 @@ Add a `.plugin-frame` and `.plugin-picker` rule to `STYLE` (insert near the `.ta
 
 Change `topbar` to accept and render the pickers:
 
+```ts
 const PLUGIN_PICKER_IDS: Record<ShellView, string> = {
 	detail: "pluginPickerDetail",
 	harness: "pluginPickerHarness",
