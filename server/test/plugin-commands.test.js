@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { runPluginCommand } from "../dist/cli/plugin-commands.js";
 import { pluginsDir, readManifest, readDevOverrides } from "../dist/plugins.js";
@@ -61,6 +61,25 @@ describe("plugin add", () => {
 			const code = await runPluginCommand(["add", repoDir], dataDir);
 			assert.equal(code, 1);
 			assert.ok(!existsSync(pluginsDir(dataDir)) || readManifest(join(pluginsDir(dataDir), "anything")) === null);
+			rmSync(repoDir, { recursive: true, force: true });
+		});
+	});
+
+	test("rejects a manifest slug containing '..' and writes nothing outside the plugins directory", async () => {
+		await withDataDir(async (dataDir) => {
+			const repoDir = makeFixtureRepo("../../../evil");
+			const code = await runPluginCommand(["add", repoDir], dataDir);
+			assert.equal(code, 1);
+
+			// The escape target -- resolved the same way a naive join(pluginsRoot, slug) would --
+			// must not exist. dataDir's tmp-dir depth is shallow enough that three ".." segments
+			// land above dataDir itself, which is safe to assert doesn't contain the escaped write.
+			const escaped = resolve(pluginsDir(dataDir), "../../../evil");
+			assert.ok(!existsSync(escaped));
+
+			// The slug is rejected before the plugins directory is even created, so nothing was
+			// installed anywhere.
+			assert.ok(!existsSync(pluginsDir(dataDir)));
 			rmSync(repoDir, { recursive: true, force: true });
 		});
 	});
