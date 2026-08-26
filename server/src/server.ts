@@ -109,8 +109,9 @@ function buildRail(db: Database.Database, active: string | undefined): string {
 
 /** Every compatible installed plugin under `pluginsRoot`, grouped by the shell slot it
  * replaces -- the shape `renderShell`'s picker expects. Incompatible plugins (a manifest's
- * `tetherApiVersion` mismatching `TETHER_API_VERSION`) are silently excluded, same as the
- * plugin-commands CLI does. */
+ * `tetherApiVersion` mismatching `TETHER_API_VERSION`) are excluded here (spec §3.3: skipped, not
+ * deleted); the mismatch is reported to the user once at install time and once per server startup
+ * (index.ts's `warnAboutIncompatiblePlugins`), not on every page render. */
 function pluginsBySlot(pluginsRoot: string): Record<"detail" | "harness" | "analytics", PluginOption[]> {
 	const compatible = listInstalledPlugins(pluginsRoot).filter((p) => p.compatible);
 	const toOption = (p: (typeof compatible)[number]): PluginOption => ({ slug: p.slug, name: p.name, entry: p.entry });
@@ -121,16 +122,57 @@ function pluginsBySlot(pluginsRoot: string): Record<"detail" | "harness" | "anal
 	};
 }
 
-/** Proxies a GET request to `targetBase + path` and pipes the response straight through to `res`.
- * Used only for plugin dev-mode overrides (§3.2/§3.4 of the plugin spec) -- keeps the iframe's
- * fetches to /api/v1/* same-origin even while the plugin's own assets are served by a separate
- * dev server, since the proxy itself is same-origin from the browser's perspective. */
-function proxyGet(targetBase: string, path: string, res: ServerResponse): void {
-	const target = new URL(path, targetBase);
-	const proxyReq = httpRequest(target, { method: "GET" }, (proxyRes) => {
-		res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers as Record<string, string>);
-		proxyRes.pipe(res);
-	});
+/** Response headers the dev-server proxy is allowed to pass back to the browser. An allowlist
+ * rather than forwarding `proxyRes.headers` wholesale: a dev server's response must not be able to
+ * set cookies (or any other header class with ambient authority) on Tether's own origin, and
+ * hop-by-hop headers like `transfer-encoding` must not be copied onto a response node is
+ * re-framing itself. */
+const PROXY_SAFE_RESPONSE_HEADERS = new Set([
+	"content-type",
+	"content-length",
+	"content-encoding",
+	"cache-control",
+	"etag",
+	"last-modified",
+	"vary",
+]);
+
+/** Proxies a GET for `assetPath` under `targetBase` and pipes the response straight through to
+ * `res`. Used only for plugin dev-mode overrides (§3.2/§3.4 of the plugin spec) -- keeps the
+ * iframe's fetches to /api/v1/* same-origin even while the plugin's own assets are served by a
+ * separate dev server, since the proxy itself is same-origin from the browser's perspective.
+ *
+ * The target is built by explicit pathname concatenation, never by relative-URL resolution
+ * (`new URL(path, targetBase)`): under WHATWG resolution a path beginning `//` is an authority,
+ * so `/plugins/<slug>//evil.com/x` would have resolved the target to `http://evil.com/x` and piped
+ * attacker-controlled content back under Tether's own origin. The URL `pathname` setter cannot
+ * change the host, so composing this way pins the target to the configured dev server. The caller
+ * additionally rejects any `assetPath` containing `//` or a backslash before it reaches here. */
+function proxyGet(targetBase: string, assetPath: string, res: ServerResponse): void {
+	let target: URL;
+	try {
+		target = new URL(targetBase);
+	} catch {
+		sendError(res, 502, "dev server override is not a valid URL");
+		return;
+	}
+	if (target.protocol !== "http:") {
+		sendError(res, 502, "dev server override must be an http:// URL");
+		return;
+	}
+	target.pathname = target.pathname.replace(/\/+$/, "") + "/" + assetPath.replace(/^\/+/, "");
+	const proxyReq = httpRequest(
+		{ protocol: target.protocol, hostname: target.hostname, port: target.port, path: target.pathname + target.search, method: "GET" },
+		(proxyRes) => {
+			const headers: Record<string, string> = {};
+			for (const [name, value] of Object.entries(proxyRes.headers)) {
+				if (!PROXY_SAFE_RESPONSE_HEADERS.has(name.toLowerCase()) || value === undefined) continue;
+				headers[name] = Array.isArray(value) ? value.join(", ") : value;
+			}
+			res.writeHead(proxyRes.statusCode ?? 502, headers);
+			proxyRes.pipe(res);
+		}
+	);
 	proxyReq.on("error", () => sendError(res, 502, "dev server unreachable"));
 	proxyReq.end();
 }
@@ -313,9 +355,20 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 			try {
 				const slug = decodeURIComponent(pluginAssetMatch[1]);
 				const assetPath = decodeURIComponent(pluginAssetMatch[2]);
-				const overrides = readDevOverrides(pluginsRoot);
-				if (overrides[slug]) {
-					proxyGet(overrides[slug], `/${assetPath}`, res);
+				// The route's `(.+)` capture can start with `/` (or contain `//`, or a backslash the
+				// URL parser treats as `/`), which is how an authority-looking path smuggles a
+				// different host into a URL. proxyGet composes its target so that can't reach the
+				// host, but nothing legitimate asks for such a path -- so reject it outright here as
+				// well, before either the proxy or the static branch sees it.
+				if (assetPath.includes("//") || assetPath.startsWith("/") || assetPath.includes("\\")) {
+					sendError(res, 400, "malformed plugin asset path");
+					return;
+				}
+				// `slug` comes off the URL, so the lookup is guarded: only an own, string-valued
+				// override counts (readDevOverrides enforces both, this re-checks at the use site).
+				const override = readDevOverrides(pluginsRoot)[slug];
+				if (typeof override === "string" && override !== "") {
+					proxyGet(override, assetPath, res);
 					return;
 				}
 				const resolved = resolvePluginAssetPath(pluginsRoot, slug, assetPath);

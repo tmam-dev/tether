@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { runPluginCommand } from "../dist/cli/plugin-commands.js";
@@ -9,7 +9,7 @@ import { pluginsDir, readManifest, readDevOverrides } from "../dist/plugins.js";
 
 /** Creates a real local git repo containing a valid plugin, so `plugin add <path>` can clone it
  * exactly like it would a real GitHub URL (git accepts a local filesystem path as a clone source). */
-function makeFixtureRepo(slug = "waterfall-view") {
+function makeFixtureRepo(slug = "waterfall-view", manifestOverrides = {}) {
 	const repoDir = mkdtempSync(join(tmpdir(), "tether-plugin-repo-"));
 	execFileSync("git", ["init", "-q"], { cwd: repoDir });
 	execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir });
@@ -17,6 +17,7 @@ function makeFixtureRepo(slug = "waterfall-view") {
 	const manifest = {
 		name: "Waterfall View", slug, version: "1.0.0", author: "test",
 		description: "test plugin", entry: "dist/index.html", replaces: "detail", tetherApiVersion: 1,
+		...manifestOverrides,
 	};
 	writeFileSync(join(repoDir, "tether-plugin.json"), JSON.stringify(manifest));
 	mkdirSync(join(repoDir, "dist"));
@@ -77,12 +78,68 @@ describe("plugin add", () => {
 			const escaped = resolve(pluginsDir(dataDir), "../../../evil");
 			assert.ok(!existsSync(escaped));
 
-			// The slug is rejected before the plugins directory is even created, so nothing was
-			// installed anywhere.
-			assert.ok(!existsSync(pluginsDir(dataDir)));
+			// The clone is staged inside the plugins root (so the final install rename is
+			// same-filesystem), so the root itself may exist -- but a rejected install leaves
+			// nothing behind in it, staging directory included.
+			assert.deepEqual(existsSync(pluginsDir(dataDir)) ? readdirSync(pluginsDir(dataDir)) : [], []);
 			rmSync(repoDir, { recursive: true, force: true });
 		});
 	});
+
+	test("creates the plugins directory 0700 and leaves no staging directory behind", async () => {
+		await withDataDir(async (dataDir) => {
+			const repoDir = makeFixtureRepo("waterfall-view");
+			assert.equal(await runPluginCommand(["add", repoDir], dataDir), 0);
+			// Same restrictive mode db.ts gives the data directory -- the plugins dir lives inside it,
+			// and `plugin add` can be the first thing that ever creates it.
+			assert.equal(statSync(pluginsDir(dataDir)).mode & 0o777, 0o700);
+			assert.deepEqual(readdirSync(pluginsDir(dataDir)), ["waterfall-view"]);
+			rmSync(repoDir, { recursive: true, force: true });
+		});
+	});
+
+	test("installs a version-mismatched plugin but warns about the mismatch", async () => {
+		await withDataDir(async (dataDir) => {
+			const repoDir = makeFixtureRepo("future-view", { tetherApiVersion: 99 });
+			const warnings = [];
+			const realWarn = console.warn;
+			console.warn = (...args) => warnings.push(args.join(" "));
+			try {
+				assert.equal(await runPluginCommand(["add", repoDir], dataDir), 0);
+			} finally {
+				console.warn = realWarn;
+			}
+			// Spec §3.3: installed anyway (nothing is deleted), but the mismatch is surfaced.
+			assert.ok(existsSync(join(pluginsDir(dataDir), "future-view")));
+			assert.equal(warnings.length, 1);
+			assert.match(warnings[0], /future-view/);
+			assert.match(warnings[0], /v99/);
+			rmSync(repoDir, { recursive: true, force: true });
+		});
+	});
+});
+
+describe("slug validation", () => {
+	for (const badSlug of ["../evil", "a/b", ".", "..", ".hidden"]) {
+		test(`plugin remove refuses the slug "${badSlug}"`, async () => {
+			await withDataDir(async (dataDir) => {
+				// remove's consequence is a recursive force-delete, so an unvalidated slug is the
+				// highest-blast-radius path in this file.
+				const victim = join(dataDir, "plugins", "..", "evil");
+				mkdirSync(victim, { recursive: true });
+				writeFileSync(join(victim, "keep.txt"), "keep");
+				assert.equal(await runPluginCommand(["remove", badSlug], dataDir), 1);
+				assert.ok(existsSync(join(victim, "keep.txt")));
+			});
+		});
+
+		test(`plugin dev refuses the slug "${badSlug}"`, async () => {
+			await withDataDir(async (dataDir) => {
+				assert.equal(await runPluginCommand(["dev", badSlug, "http://localhost:5173"], dataDir), 1);
+				assert.deepEqual(readDevOverrides(pluginsDir(dataDir)), {});
+			});
+		});
+	}
 });
 
 describe("plugin remove", () => {

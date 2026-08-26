@@ -7,9 +7,8 @@
 
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, renameSync, existsSync } from "node:fs";
-import { basename, join } from "node:path";
-import { tmpdir } from "node:os";
-import { pluginsDir, readManifest, setDevOverride } from "../plugins.js";
+import { join } from "node:path";
+import { isPlainSlug, pluginsDir, readManifest, setDevOverride, TETHER_API_VERSION } from "../plugins.js";
 
 /** Best-effort cleanup of the temp clone dir -- guarded so a cleanup failure never masks the
  * original error that triggered it. */
@@ -21,10 +20,42 @@ function cleanupCloneTarget(cloneTarget: string): void {
 	}
 }
 
+/** Rejects a slug that isn't usable as a single path segment under the plugins root. Shared by all
+ * three subcommands -- `remove`'s consequence in particular is a recursive force-delete. */
+function rejectBadSlug(slug: string, what: string): boolean {
+	if (isPlainSlug(slug)) return false;
+	console.error(`Refusing to continue: ${what} "${slug}" is not a valid plugin slug.`);
+	return true;
+}
+
 function addPlugin(gitUrl: string, dataDir: string): number {
-	const cloneTarget = mkdtempSync(join(tmpdir(), "tether-plugin-clone-"));
+	// Stage the clone INSIDE the plugins root, not in the OS temp dir: the final install is a
+	// renameSync into this same directory, and rename(2) fails with EXDEV across filesystems
+	// (tmpfs /tmp vs. a home-directory data dir is the common case on Linux). Staging here makes
+	// that rename same-filesystem, so it can't fail for filesystem-boundary reasons -- which also
+	// means a same-slug reinstall's `rmSync(dest)` + `renameSync` pair can't strand the user with
+	// the old install deleted and the new one unmoved. The `.tmp-install-` prefix is reserved:
+	// listInstalledPlugins skips dot-directories, so an in-progress clone is never picked up as an
+	// installed plugin, and isPlainSlug refuses any slug that could collide with one.
+	const root = pluginsDir(dataDir);
+	let cloneTarget: string;
 	try {
-		execFileSync("git", ["clone", "--depth", "1", gitUrl, cloneTarget], { stdio: "pipe" });
+		// mode 0o700 matches db.ts's data-directory convention (the data dir holds prompts and
+		// model outputs). Ignored if the directory already exists, so every creator must agree.
+		mkdirSync(root, { recursive: true, mode: 0o700 });
+		cloneTarget = mkdtempSync(join(root, ".tmp-install-"));
+	} catch (err) {
+		console.error(`Failed to prepare the plugins directory: ${(err as Error).message}`);
+		return 1;
+	}
+
+	try {
+		// `-c protocol.ext.allow=never` disables git's `ext::` transport, which executes an
+		// arbitrary shell command by design and is permitted by git's default `protocol.ext.allow=user`.
+		// `--` stops a gitUrl beginning with `-` from being parsed as a git option.
+		execFileSync("git", ["-c", "protocol.ext.allow=never", "clone", "--depth", "1", "--", gitUrl, cloneTarget], {
+			stdio: "pipe",
+		});
 	} catch (err) {
 		console.error(`git clone failed: ${(err as Error).message}`);
 		cleanupCloneTarget(cloneTarget);
@@ -40,17 +71,13 @@ function addPlugin(gitUrl: string, dataDir: string): number {
 
 	// manifest.slug comes from the cloned repo's tether-plugin.json -- i.e. attacker-controlled
 	// remote content when gitUrl points at a malicious or compromised repo. Reject anything that
-	// isn't a plain path segment before using it to build a filesystem path, mirroring the slug
-	// validation in plugins.ts's resolvePluginAssetPath.
-	if (manifest.slug !== basename(manifest.slug) || manifest.slug === "." || manifest.slug === "..") {
-		console.error(`Refusing to install: manifest slug "${manifest.slug}" is not a valid path segment.`);
+	// isn't a plain path segment before using it to build a filesystem path.
+	if (rejectBadSlug(manifest.slug, "manifest slug")) {
 		cleanupCloneTarget(cloneTarget);
 		return 1;
 	}
 
 	try {
-		const root = pluginsDir(dataDir);
-		mkdirSync(root, { recursive: true });
 		const dest = join(root, manifest.slug);
 		rmSync(dest, { recursive: true, force: true });
 		renameSync(cloneTarget, dest);
@@ -61,10 +88,20 @@ function addPlugin(gitUrl: string, dataDir: string): number {
 	}
 
 	console.log(`Installed "${manifest.name}" (${manifest.slug}) -> replaces "${manifest.replaces}"`);
+	// Spec §3.3: a version-mismatched plugin still installs (nothing is deleted), but the mismatch
+	// has to be surfaced -- otherwise the author sees a clean install and a plugin that silently
+	// never appears in any picker.
+	if (manifest.tetherApiVersion !== TETHER_API_VERSION) {
+		console.warn(
+			`Warning: "${manifest.name}" (${manifest.slug}) targets Tether plugin API v${manifest.tetherApiVersion}, ` +
+				`this server runs v${TETHER_API_VERSION} — it won't appear in any picker until updated.`
+		);
+	}
 	return 0;
 }
 
 function removePlugin(slug: string, dataDir: string): number {
+	if (rejectBadSlug(slug, "slug")) return 1;
 	const dir = join(pluginsDir(dataDir), slug);
 	if (!existsSync(dir)) {
 		console.error(`No installed plugin with slug "${slug}".`);
@@ -77,6 +114,7 @@ function removePlugin(slug: string, dataDir: string): number {
 }
 
 function devPlugin(slug: string, url: string | undefined, dataDir: string): number {
+	if (rejectBadSlug(slug, "slug")) return 1;
 	const dir = join(pluginsDir(dataDir), slug);
 	if (!existsSync(dir) || !readManifest(dir)) {
 		console.error(`No installed plugin with slug "${slug}" -- run "plugin add" first.`);

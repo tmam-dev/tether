@@ -32,6 +32,22 @@ export function pluginsDir(dataDir: string): string {
 	return join(dataDir, "plugins");
 }
 
+/** True only for a slug safe to use as a single path segment under the plugins root.
+ *
+ * The single source of truth for slug validation -- used by every place that turns a slug into a
+ * filesystem path: the three CLI subcommands (whose slugs come from argv or, for `add`, from the
+ * cloned repo's own manifest, i.e. remote attacker-controlled content) and the server's
+ * `/plugins/:slug/*` asset route (whose slug comes off the URL). Rejects anything containing a
+ * path separator (so `join` can't escape the plugins root), `.`/`..`, the empty string, and any
+ * dot-prefixed name -- the latter both because a hidden plugin directory is meaningless and
+ * because `.tmp-install-*` is reserved for `plugin add`'s staging directories. */
+export function isPlainSlug(slug: string): boolean {
+	if (typeof slug !== "string" || slug === "") return false;
+	if (slug.includes("/") || slug.includes("\\") || slug.includes("\0")) return false;
+	if (slug !== basename(slug)) return false;
+	return !slug.startsWith(".");
+}
+
 function isValidManifest(v: unknown): v is PluginManifest {
 	if (typeof v !== "object" || v === null) return false;
 	const m = v as Record<string, unknown>;
@@ -73,6 +89,10 @@ export function listInstalledPlugins(pluginsRoot: string): InstalledPlugin[] {
 	}
 	const plugins: InstalledPlugin[] = [];
 	for (const slug of entries) {
+		// Skips dot-directories -- notably `plugin add`'s in-progress `.tmp-install-*` staging dirs,
+		// which briefly hold a valid manifest but aren't installed plugins yet (and whose directory
+		// name doesn't match their manifest slug, so nothing could serve their assets anyway).
+		if (!isPlainSlug(slug)) continue;
 		const manifest = readManifest(join(pluginsRoot, slug));
 		if (!manifest) continue;
 		plugins.push({ ...manifest, compatible: manifest.tetherApiVersion === TETHER_API_VERSION });
@@ -84,8 +104,8 @@ export function listInstalledPlugins(pluginsRoot: string): InstalledPlugin[] {
  * resolve outside it (path traversal via `..` or an absolute path). Returns null on any
  * violation, an unknown slug, or a target that doesn't exist -- never throws. */
 export function resolvePluginAssetPath(pluginsRoot: string, slug: string, requestedPath: string): string | null {
-	// Guard against path traversal in slug: reject if it contains separators or is "." or ".."
-	if (slug !== basename(slug) || slug === "." || slug === "..") return null;
+	// Guard against path traversal in slug -- shared with the CLI's own slug checks.
+	if (!isPlainSlug(slug)) return null;
 	const pluginDir = join(pluginsRoot, slug);
 	if (!existsSync(pluginDir)) return null;
 	const candidate = resolve(pluginDir, requestedPath);
@@ -122,20 +142,34 @@ function devOverridesPath(pluginsRoot: string): string {
 }
 
 /** Reads `<pluginsRoot>/dev-overrides.json` (slug -> dev server URL). Returns {} if the file is
- * missing or malformed -- this is a convenience dev-mode file, never load-bearing enough to throw. */
+ * missing or malformed -- this is a convenience dev-mode file, never load-bearing enough to throw.
+ *
+ * Only own, string-valued entries are kept, and each is installed with `defineProperty` so a key
+ * like `__proto__` becomes a real own data property rather than walking (or poisoning) the
+ * prototype chain -- callers do `overrides[slug]` with a slug off the URL, and that lookup must
+ * never resolve to something inherited from Object.prototype. */
 export function readDevOverrides(pluginsRoot: string): Record<string, string> {
+	const overrides: Record<string, string> = {};
 	try {
 		const raw = readFileSync(devOverridesPath(pluginsRoot), "utf-8");
 		const parsed = JSON.parse(raw);
-		return typeof parsed === "object" && parsed !== null ? parsed : {};
+		if (typeof parsed !== "object" || parsed === null) return overrides;
+		for (const [slug, url] of Object.entries(parsed as Record<string, unknown>)) {
+			if (typeof url !== "string" || url === "") continue;
+			Object.defineProperty(overrides, slug, { value: url, writable: true, enumerable: true, configurable: true });
+		}
 	} catch {
-		return {};
+		/* fall through to whatever was collected */
 	}
+	return overrides;
 }
 
 /** Sets (or, when `url` is null, clears) the dev-server override for `slug`. */
 export function setDevOverride(pluginsRoot: string, slug: string, url: string | null): void {
-	mkdirSync(pluginsRoot, { recursive: true });
+	// mode 0o700 matches db.ts's data-directory convention -- this sits inside the same data dir,
+	// which holds prompts and model outputs and must not be world-readable. (Ignored when the
+	// directory already exists, which is why every creator of it has to agree on the mode.)
+	mkdirSync(pluginsRoot, { recursive: true, mode: 0o700 });
 	const overrides = readDevOverrides(pluginsRoot);
 	if (url === null) delete overrides[slug];
 	else overrides[slug] = url;

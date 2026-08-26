@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, cpSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, cpSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -601,6 +601,70 @@ describe("GET /plugins/:slug/*", () => {
 		await new Promise((resolve) => devServer.close(resolve));
 		rmSync(pluginsRoot, { recursive: true, force: true });
 	});
+
+	// Regression test for the origin-injection hole in the dev proxy: the route's `(.+)` asset
+	// capture can start with `/`, and the proxy used to build its target with `new URL(path, base)`,
+	// where a `//host/...` path is an authority -- so this request resolved to a DIFFERENT host and
+	// piped that host's content back to the browser under Tether's own origin (reachable from any
+	// web page via a plain <iframe>, with the full trace store at /api/v1/* one same-origin fetch
+	// away). Against the old code this test fails: the response is a 200 carrying "other host
+	// content".
+	test("does not let an authority-shaped asset path redirect the dev proxy to another host", async () => {
+		const pluginsRoot = makeFixturePluginsRoot();
+		const devServer = createHttpServer((req, res) => {
+			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+			res.end("<p>dev server content</p>");
+		});
+		const otherHost = createHttpServer((req, res) => {
+			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+			res.end("<p>other host content</p>");
+		});
+		await new Promise((resolve) => devServer.listen(0, "127.0.0.1", resolve));
+		await new Promise((resolve) => otherHost.listen(0, "127.0.0.1", resolve));
+		const devPort = devServer.address().port;
+		const otherPort = otherHost.address().port;
+		writeFileSync(
+			join(pluginsRoot, "dev-overrides.json"),
+			JSON.stringify({ "sample-plugin": `http://127.0.0.1:${devPort}` })
+		);
+		await withServer(async ({ port }) => {
+			for (const attack of [
+				`/127.0.0.1:${otherPort}/x`, // the canonical form: `/plugins/<slug>//<host>/<path>`
+				`//127.0.0.1:${otherPort}/x`, // extra slashes -- WHATWG tolerates them before an authority
+				encodeURIComponent(`//127.0.0.1:${otherPort}/x`), // percent-encoded to survive any URL normalization
+				`/${encodeURIComponent(`/127.0.0.1:${otherPort}/x`)}`,
+				`\\\\127.0.0.1:${otherPort}\\x`, // backslashes, which the WHATWG URL parser treats as `/`
+			]) {
+				const res = await fetch(`http://127.0.0.1:${port}/plugins/sample-plugin/${attack}`);
+				const body = await res.text();
+				assert.equal(res.status, 400, `"${attack}" must be rejected, not proxied`);
+				assert.doesNotMatch(body, /other host content/, `"${attack}" reached the other host`);
+			}
+		}, { pluginsRoot });
+		await new Promise((resolve) => devServer.close(resolve));
+		await new Promise((resolve) => otherHost.close(resolve));
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("does not forward a dev server's set-cookie header onto Tether's origin", async () => {
+		const pluginsRoot = makeFixturePluginsRoot();
+		const devServer = createHttpServer((req, res) => {
+			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Set-Cookie": "evil=1" });
+			res.end("<p>dev server content</p>");
+		});
+		await new Promise((resolve) => devServer.listen(0, "127.0.0.1", resolve));
+		writeFileSync(
+			join(pluginsRoot, "dev-overrides.json"),
+			JSON.stringify({ "sample-plugin": `http://127.0.0.1:${devServer.address().port}` })
+		);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/plugins/sample-plugin/dist/index.html`);
+			assert.equal(res.status, 200);
+			assert.equal(res.headers.get("set-cookie"), null);
+		}, { pluginsRoot });
+		await new Promise((resolve) => devServer.close(resolve));
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
 });
 
 describe("plugin picker wiring", () => {
@@ -611,6 +675,28 @@ describe("plugin picker wiring", () => {
 			const html = await res.text();
 			assert.match(html, /data-plugin-slot="detail"/);
 			assert.match(html, /Sample Plugin/);
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("omits a version-incompatible plugin from its slot's picker", async () => {
+		const pluginsRoot = makeFixturePluginsRoot();
+		// A second detail plugin whose manifest targets a plugin API version this server doesn't
+		// run: spec §3.3 says it stays installed but is skipped, so the picker must not offer it
+		// (while the compatible sample-plugin still shows up).
+		mkdirSync(join(pluginsRoot, "future-plugin"), { recursive: true });
+		writeFileSync(
+			join(pluginsRoot, "future-plugin", "tether-plugin.json"),
+			JSON.stringify({
+				name: "Future Plugin", slug: "future-plugin", version: "1.0.0", author: "test",
+				description: "targets a newer API", entry: "index.html", replaces: "detail", tetherApiVersion: 99,
+			})
+		);
+		await withServer(async ({ port }) => {
+			const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+			assert.match(html, /Sample Plugin/);
+			assert.doesNotMatch(html, /Future Plugin/);
+			assert.doesNotMatch(html, /future-plugin/);
 		}, { pluginsRoot });
 		rmSync(pluginsRoot, { recursive: true, force: true });
 	});
