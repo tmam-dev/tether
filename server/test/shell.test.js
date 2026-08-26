@@ -54,3 +54,33 @@ describe("renderShell", () => {
 		assert.match(renderShell({ view: "analytics" }, "Tether", "", ""), /<script src="\/app\.js" defer><\/script>/);
 	});
 });
+
+describe("plugin picker", () => {
+	const plugins = {
+		detail: [{ slug: "waterfall-view", name: "Waterfall View", entry: "dist/index.html" }],
+		harness: [],
+		analytics: [],
+	};
+
+	test("renders a picker (by fixed id) for a slot with installed plugins, visible for the active view", () => {
+		const html = renderShell({ view: "detail", traceId: "a".repeat(32) }, "Tether", "", "", plugins);
+		assert.match(html, /<select id="pluginPickerDetail" class="plugin-picker" data-plugin-slot="detail">/);
+		assert.match(html, /<option value="waterfall-view" data-entry="dist\/index\.html">Waterfall View<\/option>/);
+		assert.doesNotMatch(html, /id="pluginPickerDetail"[^>]*style="display:\s*none"/);
+	});
+
+	test("hides a slot's picker when it isn't the active view", () => {
+		const html = renderShell({ view: "analytics" }, "Tether", "", "", plugins);
+		assert.match(html, /id="pluginPickerDetail"[^>]*style="display:\s*none"/);
+	});
+
+	test("omits a picker entirely for a slot with no installed plugins", () => {
+		const html = renderShell({ view: "harness", traceId: "a".repeat(32) }, "Tether", "", "", plugins);
+		assert.doesNotMatch(html, /id="pluginPickerHarness"/);
+	});
+
+	test("defaults to no pickers when pluginsBySlot is omitted", () => {
+		const html = renderShell({ view: "detail", traceId: "a".repeat(32) }, "Tether", "", "");
+		assert.doesNotMatch(html, /plugin-picker/);
+	});
+});

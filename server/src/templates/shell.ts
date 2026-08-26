@@ -5,6 +5,12 @@ export interface ShellState {
 	traceId?: string;
 }
 
+export interface PluginOption {
+	slug: string;
+	name: string;
+	entry: string;
+}
+
 function escapeHtml(s: string): string {
 	return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 }
@@ -210,11 +216,26 @@ const STYLE = `
 	@media (prefers-reduced-motion: reduce) { * { transition: none !important; } .play-btn { display: none; } }
 `;
 
+const PLUGIN_PICKER_IDS: Record<ShellView, string> = {
+	detail: "pluginPickerDetail",
+	harness: "pluginPickerHarness",
+	analytics: "pluginPickerAnalytics",
+};
+
+function pluginPicker(slot: ShellView, state: ShellState, options: PluginOption[]): string {
+	if (options.length === 0) return "";
+	const visible = state.view === slot;
+	const opts = options
+		.map((o) => `<option value="${escapeHtml(o.slug)}" data-entry="${escapeHtml(o.entry)}">${escapeHtml(o.name)}</option>`)
+		.join("");
+	return `<select id="${PLUGIN_PICKER_IDS[slot]}" class="plugin-picker" data-plugin-slot="${slot}"${visible ? "" : ' style="display:none"'}><option value="">Native</option>${opts}</select>`;
+}
+
 // Invariant that must hold on both this server-rendered version and app.ts's client-updated
 // updateHarnessTab(): no `href` attribute on the Harness tab iff aria-disabled="true".
 // onRailOrTabClick's disabled check and any code doing `new URL(anchor.href)` on this tab depend
 // on that equivalence holding in both places.
-function topbar(state: ShellState): string {
+function topbar(state: ShellState, pluginsBySlot: Record<ShellView, PluginOption[]>): string {
 	const disabled = !state.traceId;
 	const hrefAttr = state.traceId ? ` href="/runs/${escapeHtml(state.traceId)}/harness"` : "";
 	const disabledAttr = disabled ? ' aria-disabled="true"' : "";
@@ -224,27 +245,45 @@ function topbar(state: ShellState): string {
 	return `<div class="tabbar">
 		${harnessTab}
 		${analyticsTab}
+		${pluginPicker("detail", state, pluginsBySlot.detail)}
+		${pluginPicker("harness", state, pluginsBySlot.harness)}
+		${pluginPicker("analytics", state, pluginsBySlot.analytics)}
 		<button class="iconbtn" id="themeBtn" type="button" title="Toggle theme" aria-label="Toggle light/dark theme">
 			<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>
 		</button>
 	</div>`;
 }
 
+const NO_PLUGINS: Record<ShellView, PluginOption[]> = { detail: [], harness: [], analytics: [] };
+
+const PLUGIN_STYLES = `
+	.plugin-picker { font: inherit; font-size: 12px; color: var(--ink-2); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; }
+	.plugin-frame { width: 100%; height: 70vh; min-height: 480px; border: 0; border-radius: var(--radius); background: var(--panel); }
+`;
+
 /** The one document every route now returns. `railHtml` and `panelHtml` are pre-rendered by the
  * caller (server.ts) so this module never needs to import runs.ts/harness.ts/analytics.ts's data
  * functions -- it only assembles markup already produced elsewhere. */
-export function renderShell(state: ShellState, title: string, railHtml: string, panelHtml: string): string {
+export function renderShell(
+	state: ShellState,
+	title: string,
+	railHtml: string,
+	panelHtml: string,
+	pluginsBySlot: Record<ShellView, PluginOption[]> = NO_PLUGINS
+): string {
 	const bootstrap = JSON.stringify({ view: state.view, traceId: state.traceId ?? null }).replace(/</g, "\\u003c");
+	const hasPlugins = Object.values(pluginsBySlot).some((p) => p.length > 0);
+	const styles = STYLE + (hasPlugins ? PLUGIN_STYLES : "");
 	return `<!doctype html>
 <title>${escapeHtml(title)}</title>
-<style>${STYLE}</style>
+<style>${styles}</style>
 <div class="shell">
 	<nav class="rail-wrap">
 		<div class="rail-brand"><span class="brand-name">Tether</span><a href="/" class="rail-home" aria-label="Latest run" title="Latest run">&larr;</a></div>
 		<div id="rail">${railHtml}</div>
 	</nav>
 	<div class="main-wrap">
-		${topbar(state)}
+		${topbar(state, pluginsBySlot)}
 		<main id="content">${panelHtml}</main>
 	</div>
 </div>
