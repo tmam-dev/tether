@@ -86,6 +86,17 @@ export function buildStepSpan(
 	};
 }
 
+export interface LlmMessage {
+	role: "system" | "user" | "assistant" | "tool";
+	content: string;
+}
+
+export interface LlmCompletion {
+	role: "assistant";
+	content: string;
+	tool_calls?: unknown;
+}
+
 export function buildLlmCallSpan(
 	run: Pick<Run, "traceId" | "rootSpanId" | "agent">,
 	spanId: string,
@@ -93,8 +104,8 @@ export function buildLlmCallSpan(
 	end: string,
 	args: {
 		model: string;
-		prompt?: string;
-		completion?: string;
+		messages?: LlmMessage[];
+		completion?: LlmCompletion;
 		input_tokens?: number;
 		output_tokens?: number;
 		cost_usd?: number;
@@ -125,8 +136,8 @@ export function buildLlmCallSpan(
 			"gen_ai.usage.cost": args.cost_usd,
 		},
 		events: [
-			...(args.prompt ? [{ name: "gen_ai.content.prompt", attributes: { "gen_ai.prompt": args.prompt } }] : []),
-			...(args.completion ? [{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": args.completion } }] : []),
+			...(args.messages && args.messages.length > 0 ? [{ name: "gen_ai.content.prompt", attributes: { "gen_ai.prompt": JSON.stringify(sanitize(args.messages)) } }] : []),
+			...(args.completion !== undefined ? [{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": JSON.stringify(sanitize(args.completion)) } }] : []),
 		],
 		...(isError ? { error: { message: args.error_message ?? "llm call failed" } } : {}),
 	};
@@ -240,8 +251,15 @@ export function buildTrailServer(cfg: TrailConfig, judgeCfg: JudgeConfig | undef
 			inputSchema: {
 				run_id: z.string(),
 				model: z.string().describe("Model id, e.g. 'claude-sonnet-4-5' or 'gpt-4o-mini'"),
-				prompt: z.string().optional(),
-				completion: z.string().optional(),
+				messages: z.array(z.object({
+					role: z.enum(["system", "user", "assistant", "tool"]),
+					content: z.string(),
+				})).optional().describe("The messages sent to the model"),
+				completion: z.object({
+					role: z.literal("assistant"),
+					content: z.string(),
+					tool_calls: z.unknown().optional(),
+				}).optional().describe("The assistant's response message"),
 				input_tokens: z.number().optional(),
 				output_tokens: z.number().optional(),
 				cost_usd: z.number().optional(),
@@ -250,7 +268,7 @@ export function buildTrailServer(cfg: TrailConfig, judgeCfg: JudgeConfig | undef
 				error_message: z.string().optional(),
 			},
 		},
-		async ({ run_id, model, prompt, completion, input_tokens, output_tokens, cost_usd, duration_ms, status, error_message }) => {
+		async ({ run_id, model, messages, completion, input_tokens, output_tokens, cost_usd, duration_ms, status, error_message }) => {
 			const run = getRun(run_id);
 			const end = nowNanos();
 			const start = duration_ms
@@ -259,7 +277,7 @@ export function buildTrailServer(cfg: TrailConfig, judgeCfg: JudgeConfig | undef
 			const isError = status === "error";
 			run.steps += 1;
 			if (isError) run.errors += 1;
-			await sendSpan(cfg, buildLlmCallSpan(run, hexId(8), start, end, { model, prompt, completion, input_tokens, output_tokens, cost_usd, status, error_message }));
+			await sendSpan(cfg, buildLlmCallSpan(run, hexId(8), start, end, { model, messages, completion, input_tokens, output_tokens, cost_usd, status, error_message }));
 			return ok(`llm call logged (${model}${isError ? ", error" : ""})`);
 		},
 	);
