@@ -422,9 +422,18 @@ const PLUGIN_PICKER_IDS: Record<ShellState["view"], string> = {
 	analytics: "pluginPickerAnalytics",
 };
 
+// Tracks, per slot, the picker value that's actually mounted right now (an installed plugin's
+// slug, or "" for Native) -- separate from `select.value`, which a change event has already
+// overwritten with the user's new (not-yet-installed/mounted) choice by the time the handler below
+// runs. onPluginPickerChange reads this to know what to revert the visible <select> to if an
+// install attempt fails, instead of unconditionally snapping back to "" and hiding a plugin that's
+// still actually mounted underneath.
+const mountedPluginValue: Record<ShellState["view"], string> = { detail: "", harness: "", analytics: "" };
+
 function setPluginPickerVisibility(view: ShellState["view"]): void {
 	(Object.keys(PLUGIN_PICKER_IDS) as Array<ShellState["view"]>).forEach((slot) => {
 		const el = document.getElementById(PLUGIN_PICKER_IDS[slot]) as HTMLSelectElement | null;
+		mountedPluginValue[slot] = "";
 		if (!el) return;
 		el.style.display = slot === view ? "" : "none";
 		el.value = "";
@@ -445,12 +454,19 @@ function mountPluginFrame(slug: string, entry: string, slot: ShellState["view"])
 function onPluginPickerChange(slot: ShellState["view"]): Promise<void> | void {
 	const select = document.getElementById(PLUGIN_PICKER_IDS[slot]) as HTMLSelectElement | null;
 	if (!select) return;
+	// Captured before `raw` below: by the time a "change" event fires, the browser has already
+	// overwritten select.value with the user's new pick, so this is the only place that still knows
+	// what was actually mounted a moment ago.
+	const previousValue = mountedPluginValue[slot];
 	const raw = select.value;
 	if (raw.startsWith("registry:")) {
 		const registrySlug = raw.slice("registry:".length);
 		const option = select.selectedOptions[0];
 		return installFromRegistry(select, registrySlug).then((plugin) => {
-			if (!plugin) { select.value = ""; return; }
+			// Install failed (or installed but version-incompatible, see installFromRegistry) --
+			// revert the visible selection to whatever's still actually mounted, not blindly to ""
+			// (which would show "Native" even while a different plugin's iframe is still on screen).
+			if (!plugin) { select.value = previousValue; return; }
 			if (option) {
 				option.value = plugin.slug;
 				option.textContent = plugin.name;
@@ -458,13 +474,19 @@ function onPluginPickerChange(slot: ShellState["view"]): Promise<void> | void {
 			}
 			if (currentUnmount) { currentUnmount(); currentUnmount = null; }
 			select.value = plugin.slug;
+			mountedPluginValue[slot] = plugin.slug;
 			mountPluginFrame(plugin.slug, plugin.entry, slot);
 		});
 	}
 	if (currentUnmount) { currentUnmount(); currentUnmount = null; }
-	if (raw === "") { navigateTo(window.location.pathname, false); return; }
+	if (raw === "") {
+		mountedPluginValue[slot] = "";
+		navigateTo(window.location.pathname, false);
+		return;
+	}
 	const option = select.selectedOptions[0];
 	const entry = option?.getAttribute("data-entry") ?? "";
+	mountedPluginValue[slot] = raw;
 	mountPluginFrame(raw, entry, slot);
 }
 
@@ -483,9 +505,15 @@ interface InstallApiResponse {
 }
 
 /** POSTs a registry slug to /api/v1/plugins/install and returns the installed plugin's data, or
- * null on any failure (network error, non-2xx, or a version-incompatible install) -- the caller
- * resets its own picker back to "" in that case. Disables `select` for the duration of the
- * request so a second click can't fire a concurrent install of the same slug. */
+ * null on any failure (network error, non-2xx, missing plugin) OR a version-incompatible install --
+ * the caller resets its own picker in either case, since there's genuinely nothing to mount. Those
+ * two null-returning cases are NOT the same thing, though: a version mismatch means the install on
+ * disk actually succeeded (matching the CLI's install-anyway-and-warn behavior), it just can't be
+ * mounted -- so it's logged via console.warn with a distinct, informative message instead of being
+ * lumped in with a real failure under console.error. A real failure also sets `select.title` (a
+ * simple, unobtrusive tooltip) to the error message so something is visible beyond the devtools
+ * console; the version-mismatch case doesn't, since nothing went wrong. Disables `select` for the
+ * duration of the request so a second click can't fire a concurrent install of the same slug. */
 async function installFromRegistry(select: HTMLSelectElement, registrySlug: string): Promise<InstalledPluginResponse | null> {
 	select.disabled = true;
 	try {
@@ -495,13 +523,24 @@ async function installFromRegistry(select: HTMLSelectElement, registrySlug: stri
 			body: JSON.stringify({ slug: registrySlug }),
 		});
 		const body = (await res.json().catch(() => null)) as InstallApiResponse | null;
-		if (!res.ok || !body?.ok || !body.plugin || body.compatible === false) {
-			console.error(`Failed to install plugin "${registrySlug}"${body?.error ? `: ${body.error}` : ""}`);
+		if (!res.ok || !body?.ok || !body.plugin) {
+			const message = `Failed to install plugin "${registrySlug}"${body?.error ? `: ${body.error}` : ""}`;
+			console.error(message);
+			select.title = message;
 			return null;
 		}
+		if (body.compatible === false) {
+			console.warn(
+				`Installed "${body.plugin.name}" (${body.plugin.slug}), but it targets an incompatible Tether plugin API version and won't appear in any picker until updated.`
+			);
+			return null;
+		}
+		select.title = "";
 		return body.plugin;
 	} catch {
-		console.error(`Failed to install plugin "${registrySlug}": network error`);
+		const message = `Failed to install plugin "${registrySlug}": network error`;
+		console.error(message);
+		select.title = message;
 		return null;
 	} finally {
 		select.disabled = false;
@@ -602,14 +641,23 @@ async function initWidgetDashboard(): Promise<void> {
 	}
 	persisted.forEach(addWidget);
 
+	// This picker is a stateless "Add widget…" control -- unlike the panel pickers, it never
+	// reflects a single "currently mounted" choice, so its own previous value is always "" (it's
+	// reset back to "" after every change, success or failure). Tracked explicitly anyway, the same
+	// way onPluginPickerChange's mountedPluginValue is, so a failed install restores an actual
+	// captured previous value rather than a hardcoded "" -- if this control's reset behavior ever
+	// changes, this keeps working instead of silently becoming wrong.
+	let previousPickerValue = "";
+
 	picker.addEventListener("change", () => {
 		const raw = picker.value;
 		if (raw === "") return;
+		const capturedPreviousValue = previousPickerValue;
 		if (raw.startsWith("registry:")) {
 			const registrySlug = raw.slice("registry:".length);
 			const option = optionsBySlug.get(raw);
 			return installFromRegistry(picker, registrySlug).then((plugin) => {
-				if (!plugin || !option) { picker.value = ""; return; }
+				if (!plugin || !option) { picker.value = capturedPreviousValue; return; }
 				option.value = plugin.slug;
 				option.textContent = plugin.name;
 				option.setAttribute("data-entry", plugin.entry);
@@ -617,11 +665,11 @@ async function initWidgetDashboard(): Promise<void> {
 				optionsBySlug.delete(raw);
 				optionsBySlug.set(plugin.slug, option);
 				if (addWidget(plugin.slug)) saveDashboardSlugs(Array.from(cardsBySlug.keys()));
-				picker.value = "";
+				picker.value = previousPickerValue = "";
 			});
 		}
 		if (addWidget(raw)) saveDashboardSlugs(Array.from(cardsBySlug.keys()));
-		picker.value = "";
+		picker.value = previousPickerValue = "";
 	});
 }
 

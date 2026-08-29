@@ -620,6 +620,96 @@ describe("plugin picker — registry install", () => {
 		await assert.doesNotReject(sandbox.onPluginPickerChange("detail"));
 		assert.equal(picker.value, "");
 	});
+
+	// Fix 5: a version-incompatible install is NOT the same thing as a real failure -- the plugin
+	// genuinely landed on disk (matching the CLI's install-anyway-and-warn behavior), it just can't
+	// be mounted. The picker still resets (nothing to mount), but the console message must be
+	// distinguishable from a real failure: console.warn, not console.error.
+	test("a version-incompatible install (compatible:false) resets the picker via console.warn, not console.error", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		await sandbox.navigateTo("/runs/" + "a".repeat(32), true);
+
+		const picker = new FakeSelectElement("pluginPickerDetail");
+		picker._options.push({ value: "registry:future-plugin", getAttribute: () => null });
+		picker.value = "registry:future-plugin";
+		elements.pluginPickerDetail = picker;
+
+		windowStub.fetch = (url) => {
+			if (url === "/api/v1/plugins/install") {
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ ok: true, plugin: { slug: "future-plugin", name: "Future Plugin", entry: "index.html" }, compatible: false }),
+				});
+			}
+			return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") });
+		};
+
+		const warnCalls = [];
+		const errorCalls = [];
+		sandbox.console = { warn: (...a) => warnCalls.push(a.join(" ")), error: (...a) => errorCalls.push(a.join(" ")) };
+
+		await sandbox.onPluginPickerChange("detail");
+
+		// (a) the picker still resets (nothing was mounted) ...
+		assert.equal(picker.value, "");
+		assert.equal(elements.content.children.length, 0);
+		// (b) ... but via a warning, not an error, and with a message distinguishable from the
+		// generic failure path (names the plugin and the actual reason, not just "Failed to install").
+		assert.equal(errorCalls.length, 0);
+		assert.equal(warnCalls.length, 1);
+		assert.match(warnCalls[0], /future-plugin/);
+		assert.match(warnCalls[0], /incompatible/);
+	});
+
+	// Fix 6: a genuine failure must not blank the picker out from under a plugin that's still
+	// actually mounted -- it should revert to whatever was mounted before this attempt, not "".
+	test("a failed install reverts the picker to the previously-mounted plugin's slug, not blank", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		await sandbox.navigateTo("/runs/" + "a".repeat(32), true);
+
+		const picker = new FakeSelectElement("pluginPickerDetail");
+		picker._options.push({ value: "waterfall-view", getAttribute: (n) => (n === "data-entry" ? "dist/index.html" : null) });
+		picker.value = "waterfall-view";
+		elements.pluginPickerDetail = picker;
+		// Mount an already-installed plugin first, exactly like the plain "selecting a plugin option"
+		// test above -- this is the "previously mounted" state a subsequent failed install must
+		// revert back to.
+		sandbox.onPluginPickerChange("detail");
+		assert.equal(elements.content.children.length, 1);
+
+		picker._options.push({ value: "registry:broken-plugin", getAttribute: () => null });
+		picker.value = "registry:broken-plugin";
+		windowStub.fetch = (url) => {
+			if (url === "/api/v1/plugins/install") return Promise.resolve({ ok: false, status: 502, json: () => Promise.resolve({ ok: false, error: "git clone failed" }) });
+			return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") });
+		};
+
+		await sandbox.onPluginPickerChange("detail");
+
+		assert.equal(picker.value, "waterfall-view");
+	});
+
+	// Fix 6: some user-visible signal beyond the devtools console -- the simplest option (a tooltip
+	// via the <select>'s title attribute) must carry the actual error text.
+	test("a failed install sets the picker's title to the error message", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		await sandbox.navigateTo("/runs/" + "a".repeat(32), true);
+
+		const picker = new FakeSelectElement("pluginPickerDetail");
+		picker._options.push({ value: "registry:broken-plugin", getAttribute: () => null });
+		picker.value = "registry:broken-plugin";
+		elements.pluginPickerDetail = picker;
+
+		windowStub.fetch = (url) => {
+			if (url === "/api/v1/plugins/install") return Promise.resolve({ ok: false, status: 502, json: () => Promise.resolve({ ok: false, error: "git clone failed" }) });
+			return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") });
+		};
+
+		await sandbox.onPluginPickerChange("detail");
+
+		assert.match(picker.title, /broken-plugin/);
+		assert.match(picker.title, /git clone failed/);
+	});
 });
 
 describe("initWidgetDashboard", () => {
@@ -716,6 +806,37 @@ describe("initWidgetDashboard", () => {
 		assert.equal(registryOption.value, "latency-p95");
 		assert.equal(registryOption.hidden, true);
 		assert.deepEqual(putCalls[putCalls.length - 1], { slugs: ["latency-p95"] });
+	});
+
+	// Fix 6: the widget-picker path gets the same treatment as the panel pickers -- restore the
+	// picker's previous value (always "" for this stateless "Add widget…" control, see app.ts) on
+	// failure rather than a bare hardcoded "", and surface the error via the picker's title.
+	test("a failed registry install on the widget picker resets to blank and sets the picker's title to the error", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		const { picker, grid } = seedWidgetPicker(elements);
+		const registryOption = {
+			value: "registry:broken-widget",
+			textContent: "Broken Widget (install)",
+			hidden: false,
+			_attrs: {},
+			setAttribute(n, v) { this._attrs[n] = v; },
+			getAttribute(n) { return this._attrs[n] ?? null; },
+		};
+		picker.options.push(registryOption);
+		windowStub.fetch = (url) => {
+			if (url === "/api/v1/plugins/install") {
+				return Promise.resolve({ ok: false, status: 502, json: () => Promise.resolve({ ok: false, error: "git clone failed" }) });
+			}
+			return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ slugs: [] }) });
+		};
+		await sandbox.initWidgetDashboard();
+		picker.value = "registry:broken-widget";
+		await picker._listeners.change[0]();
+
+		assert.equal(grid.children.length, 0);
+		assert.equal(picker.value, "");
+		assert.match(picker.title, /broken-widget/);
+		assert.match(picker.title, /git clone failed/);
 	});
 });
 
