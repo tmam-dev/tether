@@ -18,6 +18,7 @@ import { renderDetailFragment, renderEmptyDetailPanel } from "./templates/flight
 import { renderRailBody } from "./templates/rail.js";
 import { renderHarnessBody } from "./templates/harness.js";
 import { renderAnalyticsBody } from "./templates/analytics.js";
+import type { WidgetOption } from "./templates/analytics.js";
 import { renderShell, renderNotFoundPanel } from "./templates/shell.js";
 import type { ShellState, ShellView, PluginOption } from "./templates/shell.js";
 import { resolvePluginAssetPath, contentTypeFor, readDevOverrides, listInstalledPlugins, readDashboardSlugs, writeDashboardSlugs } from "./plugins.js";
@@ -133,6 +134,14 @@ function dashboardSlugsView(pluginsRoot: string): { slugs: string[] } {
 		return !!p && p.compatible && p.kind === "widget";
 	});
 	return { slugs };
+}
+
+/** Every installed, version-compatible kind:"widget" plugin, in the shape renderAnalyticsBody's
+ * picker needs -- the analytics-view analog of pluginsBySlot for panel plugins. */
+function widgetOptions(pluginsRoot: string): WidgetOption[] {
+	return listInstalledPlugins(pluginsRoot)
+		.filter((p) => p.compatible && p.kind === "widget")
+		.map((p) => ({ slug: p.slug, name: p.name, entry: p.entry, size: p.size as WidgetOption["size"] }));
 }
 
 /** Response headers the dev-server proxy is allowed to pass back to the browser. An allowlist
@@ -278,7 +287,7 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 
 		if (req.method === "GET" && pathname === "/fragments/analytics") {
 			try {
-				const body = renderAnalyticsBody(getUsage(db));
+				const body = renderAnalyticsBody(getUsage(db), widgetOptions(pluginsRoot));
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 				res.end(body);
 			} catch (err) {
@@ -536,7 +545,7 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 					{ view: "analytics" },
 					"Tether — Analytics",
 					rail,
-					renderAnalyticsBody(getUsage(db)),
+					renderAnalyticsBody(getUsage(db), widgetOptions(pluginsRoot)),
 					pluginsBySlot(pluginsRoot)
 				);
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });

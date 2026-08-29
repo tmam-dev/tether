@@ -98,6 +98,15 @@ const STYLE = `
 	.note { color: var(--ink-3); font-size: 12.5px; margin: 0 0 20px; }
 	.as-of { color: var(--ink-2); font-size: 13px; margin: 0 0 10px; }
 	.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 16px; }
+	.widget-dashboard { margin-top: 16px; }
+	.widget-dashboard-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+	.widget-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+	.widget-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+	.widget-card-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; font-size: 12.5px; font-weight: 600; border-bottom: 1px solid var(--line); }
+	.widget-remove { font: inherit; color: var(--ink-3); background: transparent; border: 0; cursor: pointer; font-size: 15px; line-height: 1; }
+	.widget-frame { width: 100%; height: 240px; border: 0; display: block; }
+	.widget-cell-small.widget-card, .widget-cell-medium.widget-card { grid-column: span 1; }
+	.widget-cell-large.widget-card { grid-column: span 2; }
 	.card-head h2 { font-size: 14px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
 	.card-head .count { font-family: var(--mono); font-size: 11px; color: var(--ink-3); font-weight: 400; }
 	.entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }

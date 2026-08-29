@@ -57,3 +57,31 @@ describe("renderAnalyticsBody", () => {
 		assert.doesNotMatch(html, /class="topbar"/);
 	});
 });
+
+function widget(overrides = {}) {
+	return { slug: "cost-trend", name: "Cost Trend", entry: "dist/index.html", size: "medium", ...overrides };
+}
+
+describe("renderAnalyticsBody widget dashboard", () => {
+	test("renders no widget section at all when no widgets are installed", () => {
+		const html = renderAnalyticsBody({ totalRuns: 0, trackedRuns: 0, entries: [] });
+		assert.equal(html.includes("addWidgetPicker"), false);
+		assert.equal(html.includes("widgetGrid"), false);
+	});
+
+	test("renders an add-widget picker option and an empty grid container per installed widget", () => {
+		const html = renderAnalyticsBody({ totalRuns: 0, trackedRuns: 0, entries: [] }, [widget()]);
+		assert.match(html, /id="addWidgetPicker"/);
+		assert.match(html, /id="widgetGrid"/);
+		assert.match(html, /value="cost-trend"/);
+		assert.match(html, /data-entry="dist\/index\.html"/);
+		assert.match(html, /data-size="medium"/);
+		assert.match(html, />Cost Trend</);
+	});
+
+	test("escapes a widget name containing HTML", () => {
+		const html = renderAnalyticsBody({ totalRuns: 0, trackedRuns: 0, entries: [] }, [widget({ name: "<script>alert(1)</script>" })]);
+		assert.equal(html.includes("<script>alert(1)</script>"), false);
+		assert.match(html, /&lt;script&gt;/);
+	});
+});
