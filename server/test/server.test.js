@@ -261,6 +261,17 @@ describe("GET/PUT /api/v1/dashboard/analytics", () => {
 		});
 	});
 
+	test("PUT rejects a syntactically invalid JSON body with 400, not 500", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/analytics`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: "{not valid json",
+			});
+			assert.equal(res.status, 400);
+		});
+	});
+
 	test("PUT rejects a slug that fails isPlainSlug and persists nothing", async () => {
 		await withServer(async ({ port }) => {
 			const res = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/analytics`, {
@@ -833,6 +844,34 @@ describe("plugin picker wiring", () => {
 			const res = await fetch(`http://127.0.0.1:${port}/analytics`);
 			const html = await res.text();
 			assert.doesNotMatch(html, /data-plugin-slot="analytics"/); // no analytics plugin installed
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("a widget manifest with a stray replaces field is excluded from that slot's panel picker", async () => {
+		// Spec: a widget's `replaces` field is "omitted and ignored if present" -- nothing rejects a
+		// manifest that carries both kind:"widget" and replaces, so pluginsBySlot itself must exclude
+		// widgets regardless of what replaces says.
+		const pluginsRoot = mkdtempSync(join(tmpdir(), "tether-plugins-fixture-"));
+		mkdirSync(join(pluginsRoot, "sneaky-widget"), { recursive: true });
+		writeFileSync(
+			join(pluginsRoot, "sneaky-widget", "tether-plugin.json"),
+			JSON.stringify({
+				name: "Sneaky Widget", slug: "sneaky-widget", version: "1.0.0", author: "test",
+				description: "a widget that also claims a panel slot", entry: "index.html",
+				kind: "widget", size: "medium", replaces: "analytics", tetherApiVersion: 1,
+			})
+		);
+		await withServer(async ({ port }) => {
+			const html = await (await fetch(`http://127.0.0.1:${port}/analytics`)).text();
+			// No panel-slot picker is rendered at all for "analytics" -- the widget is the only
+			// installed plugin, and it must not count as a compatible panel-slot option.
+			assert.doesNotMatch(html, /data-plugin-slot="analytics"/);
+			assert.doesNotMatch(html, /id="pluginPickerAnalytics"/);
+			// It's still a legitimate widget, so it's fine (expected) for it to show up in the
+			// separate "add a widget to the dashboard" picker -- that's a different affordance.
+			assert.match(html, /id="addWidgetPicker"/);
+			assert.match(html, /Sneaky Widget/);
 		}, { pluginsRoot });
 		rmSync(pluginsRoot, { recursive: true, force: true });
 	});

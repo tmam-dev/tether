@@ -113,7 +113,8 @@ function addPlugin(gitUrl: string, dataDir: string): number {
 		return 1;
 	}
 
-	console.log(`Installed "${manifest.name}" (${manifest.slug}) -> replaces "${manifest.replaces}"`);
+	const target = manifest.kind === "widget" ? `analytics widget (${manifest.size})` : `replaces "${manifest.replaces}"`;
+	console.log(`Installed "${manifest.name}" (${manifest.slug}) -> ${target}`);
 	// Spec §3.3: a version-mismatched plugin still installs (nothing is deleted), but the mismatch
 	// has to be surfaced -- otherwise the author sees a clean install and a plugin that silently
 	// never appears in any picker.

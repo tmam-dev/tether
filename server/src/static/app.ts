@@ -440,7 +440,7 @@ function buildWidgetCard(slug: string, name: string, entry: string, size: string
 	removeBtn.addEventListener("click", () => onRemove(slug));
 	head.appendChild(removeBtn);
 	const iframe = document.createElement("iframe") as HTMLIFrameElement;
-	iframe.className = "plugin-frame widget-frame";
+	iframe.className = "widget-frame";
 	iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
 	iframe.src = `/plugins/${encodeURIComponent(slug)}/${entry}`;
 	card.appendChild(head);

@@ -114,7 +114,7 @@ function buildRail(db: Database.Database, active: string | undefined): string {
  * deleted); the mismatch is reported to the user once at install time and once per server startup
  * (index.ts's `warnAboutIncompatiblePlugins`), not on every page render. */
 function pluginsBySlot(pluginsRoot: string): Record<"detail" | "harness" | "analytics", PluginOption[]> {
-	const compatible = listInstalledPlugins(pluginsRoot).filter((p) => p.compatible);
+	const compatible = listInstalledPlugins(pluginsRoot).filter((p) => p.compatible && p.kind !== "widget");
 	const toOption = (p: (typeof compatible)[number]): PluginOption => ({ slug: p.slug, name: p.name, entry: p.entry });
 	return {
 		detail: compatible.filter((p) => p.replaces === "detail").map(toOption),
@@ -417,9 +417,15 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 		}
 
 		if (req.method === "PUT" && pathname === "/api/v1/dashboard/analytics") {
+			let parsed: unknown;
 			try {
 				const bodyText = await readBody(req);
-				const parsed = JSON.parse(bodyText);
+				parsed = JSON.parse(bodyText);
+			} catch (err) {
+				sendError(res, 400, `invalid JSON body: ${(err as Error).message}`);
+				return;
+			}
+			try {
 				const slugs = (parsed as { slugs?: unknown })?.slugs;
 				if (!Array.isArray(slugs) || !slugs.every((s) => typeof s === "string")) {
 					sendError(res, 400, "body must be { slugs: string[] }");
