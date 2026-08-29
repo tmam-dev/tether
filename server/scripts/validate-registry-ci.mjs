@@ -39,25 +39,28 @@ console.log(`✓ registry/plugins.json schema is valid (${parsed.entries.length}
 for (const entry of parsed.entries) {
 	const cloneDir = mkdtempSync(join(tmpdir(), "tether-registry-ci-"));
 	try {
-		execFileSync("git", ["-c", "protocol.ext.allow=never", "clone", "--depth", "1", "--", entry.repo, cloneDir], { stdio: "pipe" });
-	} catch (err) {
-		fail(`"${entry.slug}": repo "${entry.repo}" did not clone: ${err.message}`);
-		continue;
-	}
-	const manifest = readManifest(cloneDir);
-	if (!manifest) {
-		fail(`"${entry.slug}": tether-plugin.json is missing or invalid at the repo root.`);
-	} else {
-		const manifestKind = manifest.kind ?? "panel";
-		if (manifestKind !== entry.kind) {
-			fail(`"${entry.slug}": registry kind "${entry.kind}" doesn't match the manifest's kind "${manifestKind}".`);
-		} else if (entry.kind === "panel" && manifest.replaces !== entry.slot) {
-			fail(`"${entry.slug}": registry slot "${entry.slot}" doesn't match the manifest's replaces "${manifest.replaces}".`);
-		} else {
-			console.log(`✓ "${entry.slug}": repo resolves and its manifest matches the registry entry.`);
+		try {
+			execFileSync("git", ["-c", "protocol.ext.allow=never", "clone", "--depth", "1", "--", entry.repo, cloneDir], { stdio: "pipe" });
+		} catch (err) {
+			fail(`"${entry.slug}": repo "${entry.repo}" did not clone: ${err.message}`);
+			continue;
 		}
+		const manifest = readManifest(cloneDir);
+		if (!manifest) {
+			fail(`"${entry.slug}": tether-plugin.json is missing or invalid at the repo root.`);
+		} else {
+			const manifestKind = manifest.kind ?? "panel";
+			if (manifestKind !== entry.kind) {
+				fail(`"${entry.slug}": registry kind "${entry.kind}" doesn't match the manifest's kind "${manifestKind}".`);
+			} else if (entry.kind === "panel" && manifest.replaces !== entry.slot) {
+				fail(`"${entry.slug}": registry slot "${entry.slot}" doesn't match the manifest's replaces "${manifest.replaces}".`);
+			} else {
+				console.log(`✓ "${entry.slug}": repo resolves and its manifest matches the registry entry.`);
+			}
+		}
+	} finally {
+		rmSync(cloneDir, { recursive: true, force: true });
 	}
-	rmSync(cloneDir, { recursive: true, force: true });
 }
 
 if (process.exitCode) {
