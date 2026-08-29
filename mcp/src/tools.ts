@@ -147,7 +147,7 @@ export function buildExceptionSpan(
 	run: Pick<Run, "traceId" | "rootSpanId" | "agent">,
 	spanId: string,
 	end: string,
-	args: { message: string; type?: string; name?: string },
+	args: { message: string; type?: string; name?: string; stack?: string; context?: unknown },
 ): SpanInput {
 	return {
 		traceId: run.traceId,
@@ -161,7 +161,10 @@ export function buildExceptionSpan(
 			"gen_ai.system": "trail-mcp",
 			"gen_ai.agent.name": run.agent,
 		},
-		error: { message: args.message, type: args.type },
+		events: args.context !== undefined
+			? [{ name: "gen_ai.content.context", attributes: { "gen_ai.context": JSON.stringify(sanitize(args.context)) } }]
+			: [],
+		error: { message: args.message, type: args.type, ...(args.stack !== undefined ? { stack: args.stack } : {}) },
 	};
 }
 
@@ -294,14 +297,16 @@ export function buildTrailServer(cfg: TrailConfig, judgeCfg: JudgeConfig | undef
 				message: z.string(),
 				type: z.string().optional().describe("e.g. 'BuildError', 'TestFailure'"),
 				name: z.string().optional().describe("Span name (default 'exception')"),
+				stack: z.string().optional().describe("Stack trace, if available"),
+				context: z.unknown().optional().describe("Structured context — relevant state, variables, or data at the time of failure"),
 			},
 		},
-		async ({ run_id, message, type, name }) => {
+		async ({ run_id, message, type, name, stack, context }) => {
 			const run = getRun(run_id);
 			run.steps += 1;
 			run.errors += 1;
 			const end = nowNanos();
-			await sendSpan(cfg, buildExceptionSpan(run, hexId(8), end, { message, type, name }));
+			await sendSpan(cfg, buildExceptionSpan(run, hexId(8), end, { message, type, name, stack, context }));
 			return ok("exception logged");
 		},
 	);

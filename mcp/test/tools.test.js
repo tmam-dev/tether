@@ -123,4 +123,25 @@ describe("buildExceptionSpan", () => {
 		const span = buildExceptionSpan(RUN, "s7", "2000000000", { message: "boom", name: "test-failure" });
 		assert.equal(span.name, "test-failure");
 	});
+
+	test("passes stack through to error.stack", () => {
+		const span = buildExceptionSpan(RUN, "s17", "2000000000", { message: "boom", stack: "Error: boom\n  at build.js:1:1" });
+		assert.equal(span.error.stack, "Error: boom\n  at build.js:1:1");
+	});
+
+	test("JSON-encodes context into a gen_ai.content.context event", () => {
+		const span = buildExceptionSpan(RUN, "s18", "2000000000", { message: "boom", context: { attempt: 3, file: "auth.py" } });
+		assert.deepEqual(span.events, [{ name: "gen_ai.content.context", attributes: { "gen_ai.context": JSON.stringify({ attempt: 3, file: "auth.py" }) } }]);
+	});
+
+	test("redacts a secret-shaped string inside context", () => {
+		const span = buildExceptionSpan(RUN, "s19", "2000000000", { message: "boom", context: { env: "AKIAABCDEFGHIJKLMNOP" } });
+		const decoded = JSON.parse(span.events[0].attributes["gen_ai.context"]);
+		assert.equal(decoded.env, "[REDACTED]");
+	});
+
+	test("no context produces no events", () => {
+		const span = buildExceptionSpan(RUN, "s20", "2000000000", { message: "boom" });
+		assert.deepEqual(span.events, []);
+	});
 });
