@@ -10,6 +10,7 @@ import { z } from "zod";
 import { TrailConfig, SpanInput, hexId, nowNanos, sendSpan } from "./otlp.js";
 import { buildHarnessManifest, HarnessManifest } from "./manifest.js";
 import { judgeGoalAttainment, JudgeConfig, Verdict } from "./judge.js";
+import { sanitize } from "./sanitize.js";
 
 export interface Run {
 	traceId: string;
@@ -54,8 +55,8 @@ export function buildStepSpan(
 	args: {
 		name: string;
 		kind: "task" | "tool";
-		input?: string;
-		output?: string;
+		input?: unknown;
+		output?: unknown;
 		status: "ok" | "error";
 		error_message?: string;
 		source_type?: "skill" | "sub_agent" | "mcp_server";
@@ -78,8 +79,8 @@ export function buildStepSpan(
 			...(args.source_type && args.source_name ? { "gen_ai.harness.source_type": args.source_type, "gen_ai.harness.source_name": args.source_name } : {}),
 		},
 		events: [
-			...(args.input ? [{ name: "gen_ai.content.prompt", attributes: { "gen_ai.prompt": args.input } }] : []),
-			...(args.output ? [{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": args.output } }] : []),
+			...(args.input !== undefined ? [{ name: "gen_ai.content.prompt", attributes: { "gen_ai.prompt": JSON.stringify(sanitize(args.input)) } }] : []),
+			...(args.output !== undefined ? [{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": JSON.stringify(sanitize(args.output)) } }] : []),
 		],
 		...(isError ? { error: { message: args.error_message ?? "step failed" } } : {}),
 	};
@@ -204,8 +205,8 @@ export function buildTrailServer(cfg: TrailConfig, judgeCfg: JudgeConfig | undef
 				run_id: z.string(),
 				name: z.string().describe("Step name, e.g. 'run pytest' or 'edit auth.py'"),
 				kind: z.enum(["task", "tool"]).describe("task = reasoning/work unit, tool = external action"),
-				input: z.string().optional().describe("What went in (command, arguments, file path…)"),
-				output: z.string().optional().describe("What came out (truncated result, diff summary…)"),
+				input: z.unknown().optional().describe("What went in — any JSON-serializable value (object, array, string, number…)"),
+				output: z.unknown().optional().describe("What came out — any JSON-serializable value (object, array, string, number…)"),
 				status: statusSchema,
 				error_message: z.string().optional(),
 				duration_ms: z.number().optional().describe("How long the step took (defaults to instant)"),
