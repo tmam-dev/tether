@@ -14,6 +14,12 @@ function makeFixturePluginsRoot() {
 	return root;
 }
 
+function makeWidgetFixturePluginsRoot() {
+	const root = mkdtempSync(join(tmpdir(), "tether-plugins-fixture-"));
+	cpSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "sample-widget"), join(root, "sample-widget"), { recursive: true });
+	return root;
+}
+
 function makeTempDbPath() {
 	const dir = mkdtempSync(join(tmpdir(), "tether-server-test-"));
 	return join(dir, "test.sqlite");
@@ -203,6 +209,68 @@ describe("GET /api/v1/analytics", () => {
 			const body = await res.json();
 			assert.equal(body.totalRuns, 0);
 			assert.deepEqual(body.entries, []);
+		});
+	});
+});
+
+describe("GET/PUT /api/v1/dashboard/analytics", () => {
+	test("GET on an empty store returns an empty slug list", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/analytics`);
+			assert.equal(res.status, 200);
+			assert.deepEqual(await res.json(), { slugs: [] });
+		});
+	});
+
+	test("PUT persists a slug and GET reflects it", async () => {
+		const pluginsRoot = makeWidgetFixturePluginsRoot();
+		await withServer(async ({ port }) => {
+			const put = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/analytics`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ slugs: ["sample-widget"] }),
+			});
+			assert.equal(put.status, 200);
+			assert.deepEqual(await put.json(), { slugs: ["sample-widget"] });
+			const get = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/analytics`);
+			assert.deepEqual(await get.json(), { slugs: ["sample-widget"] });
+		}, { pluginsRoot });
+	});
+
+	test("GET drops a persisted slug that is no longer installed", async () => {
+		const pluginsRoot = makeWidgetFixturePluginsRoot();
+		await withServer(async ({ port }) => {
+			await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/analytics`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ slugs: ["sample-widget", "never-installed"] }),
+			});
+			const get = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/analytics`);
+			assert.deepEqual(await get.json(), { slugs: ["sample-widget"] });
+		}, { pluginsRoot });
+	});
+
+	test("PUT rejects a malformed body", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/analytics`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ slugs: "not-an-array" }),
+			});
+			assert.equal(res.status, 400);
+		});
+	});
+
+	test("PUT rejects a slug that fails isPlainSlug and persists nothing", async () => {
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/analytics`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ slugs: ["../escape"] }),
+			});
+			assert.equal(res.status, 400);
+			const get = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/analytics`);
+			assert.deepEqual(await get.json(), { slugs: [] });
 		});
 	});
 });

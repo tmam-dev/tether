@@ -1,0 +1,11 @@
+{
+	"name": "Sample Widget",
+	"slug": "sample-widget",
+	"version": "1.0.0",
+	"author": "test-fixture",
+	"description": "A minimal fixture widget for server route tests.",
+	"entry": "dist/index.html",
+	"kind": "widget",
+	"size": "medium",
+	"tetherApiVersion": 1
+}

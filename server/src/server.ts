@@ -20,7 +20,7 @@ import { renderHarnessBody } from "./templates/harness.js";
 import { renderAnalyticsBody } from "./templates/analytics.js";
 import { renderShell, renderNotFoundPanel } from "./templates/shell.js";
 import type { ShellState, ShellView, PluginOption } from "./templates/shell.js";
-import { resolvePluginAssetPath, contentTypeFor, readDevOverrides, listInstalledPlugins } from "./plugins.js";
+import { resolvePluginAssetPath, contentTypeFor, readDevOverrides, listInstalledPlugins, readDashboardSlugs, writeDashboardSlugs } from "./plugins.js";
 
 const APP_JS = readFileSync(fileURLToPath(new URL("./static/app.js", import.meta.url)), "utf-8");
 
@@ -120,6 +120,19 @@ function pluginsBySlot(pluginsRoot: string): Record<"detail" | "harness" | "anal
 		harness: compatible.filter((p) => p.replaces === "harness").map(toOption),
 		analytics: compatible.filter((p) => p.replaces === "analytics").map(toOption),
 	};
+}
+
+/** GET's response shape, and what PUT returns after a successful write: the persisted slug list,
+ * filtered to widgets that are still installed and version-compatible -- a slug for a plugin
+ * that's since been removed or gone incompatible is silently dropped, never surfaced as an error,
+ * matching plugins.ts's existing "missing manifest = skip" convention. */
+function dashboardSlugsView(pluginsRoot: string): { slugs: string[] } {
+	const bySlug = new Map(listInstalledPlugins(pluginsRoot).map((p) => [p.slug, p]));
+	const slugs = readDashboardSlugs(pluginsRoot).filter((slug) => {
+		const p = bySlug.get(slug);
+		return !!p && p.compatible && p.kind === "widget";
+	});
+	return { slugs };
 }
 
 /** Response headers the dev-server proxy is allowed to pass back to the browser. An allowlist
@@ -378,6 +391,37 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 			try {
 				res.writeHead(200, { "Content-Type": "application/json" });
 				res.end(JSON.stringify(getUsage(db)));
+			} catch (err) {
+				sendError(res, 500, (err as Error).message);
+			}
+			return;
+		}
+
+		if (req.method === "GET" && pathname === "/api/v1/dashboard/analytics") {
+			try {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify(dashboardSlugsView(pluginsRoot)));
+			} catch (err) {
+				sendError(res, 500, (err as Error).message);
+			}
+			return;
+		}
+
+		if (req.method === "PUT" && pathname === "/api/v1/dashboard/analytics") {
+			try {
+				const bodyText = await readBody(req);
+				const parsed = JSON.parse(bodyText);
+				const slugs = (parsed as { slugs?: unknown })?.slugs;
+				if (!Array.isArray(slugs) || !slugs.every((s) => typeof s === "string")) {
+					sendError(res, 400, "body must be { slugs: string[] }");
+					return;
+				}
+				if (!writeDashboardSlugs(pluginsRoot, slugs)) {
+					sendError(res, 400, "one or more slugs are invalid");
+					return;
+				}
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify(dashboardSlugsView(pluginsRoot)));
 			} catch (err) {
 				sendError(res, 500, (err as Error).message);
 			}
