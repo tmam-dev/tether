@@ -13,6 +13,8 @@ import {
 	readDevOverrides,
 	setDevOverride,
 	isPlainSlug,
+	readDashboardSlugs,
+	writeDashboardSlugs,
 } from "../dist/plugins.js";
 
 function withTempPluginsRoot(fn) {
@@ -262,6 +264,37 @@ describe("dev overrides", () => {
 			assert.deepEqual(readDevOverrides(root), { "waterfall-view": "http://localhost:5173" });
 			setDevOverride(root, "waterfall-view", null);
 			assert.deepEqual(readDevOverrides(root), {});
+		});
+	});
+});
+
+describe("dashboard slug persistence", () => {
+	test("returns an empty list when no dashboard file exists yet", () => {
+		withTempPluginsRoot((root) => {
+			assert.deepEqual(readDashboardSlugs(root), []);
+		});
+	});
+
+	test("a write/read round-trip preserves order", () => {
+		withTempPluginsRoot((root) => {
+			assert.equal(writeDashboardSlugs(root, ["cost-trend", "latency-p95"]), true);
+			assert.deepEqual(readDashboardSlugs(root), ["cost-trend", "latency-p95"]);
+		});
+	});
+
+	test("a malformed dashboard file reads back as an empty list, never throws", () => {
+		withTempPluginsRoot((root) => {
+			mkdirSync(root, { recursive: true });
+			writeFileSync(join(root, "analytics-dashboard.json"), "{not json");
+			assert.doesNotThrow(() => readDashboardSlugs(root));
+			assert.deepEqual(readDashboardSlugs(root), []);
+		});
+	});
+
+	test("writing a slug that fails isPlainSlug is rejected and nothing is written", () => {
+		withTempPluginsRoot((root) => {
+			assert.equal(writeDashboardSlugs(root, ["cost-trend", "../escape"]), false);
+			assert.deepEqual(readDashboardSlugs(root), []);
 		});
 	});
 });

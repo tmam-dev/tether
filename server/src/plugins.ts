@@ -193,3 +193,32 @@ export function setDevOverride(pluginsRoot: string, slug: string, url: string | 
 	else overrides[slug] = url;
 	writeFileSync(devOverridesPath(pluginsRoot), JSON.stringify(overrides, null, 2));
 }
+
+function dashboardPath(pluginsRoot: string): string {
+	return join(pluginsRoot, "analytics-dashboard.json");
+}
+
+/** The persisted, ordered list of widget slugs on the Analytics dashboard. Never throws -- a
+ * missing or malformed file (or a non-array/non-string entry) reads back as []. Does NOT filter
+ * against what's actually installed/compatible -- server.ts's dashboardSlugsView does that, the
+ * same way pluginsBySlot filters listInstalledPlugins for the panel pickers. */
+export function readDashboardSlugs(pluginsRoot: string): string[] {
+	try {
+		const raw = readFileSync(dashboardPath(pluginsRoot), "utf-8");
+		const parsed = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter((s): s is string => typeof s === "string" && isPlainSlug(s));
+	} catch {
+		return [];
+	}
+}
+
+/** Persists `slugs` as the dashboard's full ordered list, replacing whatever was there. Refuses
+ * (returns false, writes nothing) if any slug fails isPlainSlug -- the same guard every other
+ * slug-to-filesystem-path use in this module applies. */
+export function writeDashboardSlugs(pluginsRoot: string, slugs: string[]): boolean {
+	if (!slugs.every(isPlainSlug)) return false;
+	mkdirSync(pluginsRoot, { recursive: true, mode: 0o700 });
+	writeFileSync(dashboardPath(pluginsRoot), JSON.stringify(slugs, null, 2));
+	return true;
+}
