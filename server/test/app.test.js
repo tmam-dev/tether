@@ -551,6 +551,77 @@ describe("plugin picker", () => {
 	});
 });
 
+describe("plugin picker — registry install", () => {
+	test("selecting a registry option installs it, then mounts the returned plugin", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		await sandbox.navigateTo("/runs/" + "a".repeat(32), true);
+
+		const picker = new FakeSelectElement("pluginPickerDetail");
+		const registryOption = {
+			value: "registry:waterfall-view",
+			textContent: "Waterfall (install)",
+			_attrs: {},
+			setAttribute(n, v) { this._attrs[n] = v; },
+			getAttribute(n) { return this._attrs[n] ?? null; },
+		};
+		picker._options.push(registryOption);
+		picker.value = "registry:waterfall-view";
+		elements.pluginPickerDetail = picker;
+
+		let installBody = null;
+		windowStub.fetch = (url, opts) => {
+			if (url === "/api/v1/plugins/install") {
+				installBody = JSON.parse(opts.body);
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, plugin: { slug: "waterfall-view", name: "Waterfall View", entry: "dist/index.html" }, compatible: true }) });
+			}
+			return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") });
+		};
+
+		await sandbox.onPluginPickerChange("detail");
+
+		assert.deepEqual(installBody, { slug: "waterfall-view" });
+		assert.equal(registryOption.value, "waterfall-view");
+		assert.equal(registryOption.textContent, "Waterfall View");
+		assert.equal(picker.value, "waterfall-view");
+		assert.equal(elements.content.children[0].src, `/plugins/waterfall-view/dist/index.html?traceId=${"a".repeat(32)}`);
+	});
+
+	test("a failed install (non-2xx) resets the picker to Native instead of mounting anything", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		await sandbox.navigateTo("/runs/" + "a".repeat(32), true);
+
+		const picker = new FakeSelectElement("pluginPickerDetail");
+		picker._options.push({ value: "registry:broken-plugin", getAttribute: () => null });
+		picker.value = "registry:broken-plugin";
+		elements.pluginPickerDetail = picker;
+
+		windowStub.fetch = (url) => {
+			if (url === "/api/v1/plugins/install") return Promise.resolve({ ok: false, status: 502, json: () => Promise.resolve({ ok: false, error: "git clone failed" }) });
+			return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") });
+		};
+
+		await sandbox.onPluginPickerChange("detail");
+
+		assert.equal(picker.value, "");
+		assert.equal(elements.content.children.length, 0);
+	});
+
+	test("a network error during install resets the picker instead of throwing", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		await sandbox.navigateTo("/runs/" + "a".repeat(32), true);
+
+		const picker = new FakeSelectElement("pluginPickerDetail");
+		picker._options.push({ value: "registry:broken-plugin", getAttribute: () => null });
+		picker.value = "registry:broken-plugin";
+		elements.pluginPickerDetail = picker;
+
+		windowStub.fetch = () => Promise.reject(new Error("network down"));
+
+		await assert.doesNotReject(sandbox.onPluginPickerChange("detail"));
+		assert.equal(picker.value, "");
+	});
+});
+
 describe("initWidgetDashboard", () => {
 	test("does nothing when the analytics view has no widget grid/picker (e.g. Detail/Harness)", async () => {
 		const { sandbox } = loadApp();
@@ -615,6 +686,36 @@ describe("initWidgetDashboard", () => {
 		assert.equal(grid.children.length, 0);
 		assert.equal(picker.options[1].hidden, false);
 		assert.deepEqual(putCalls[putCalls.length - 1], { slugs: [] });
+	});
+
+	test("choosing a registry option installs it, adds it to the grid, and persists the new list", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		const { picker, grid } = seedWidgetPicker(elements);
+		const registryOption = {
+			value: "registry:latency-p95",
+			textContent: "Latency P95 (install)",
+			hidden: false,
+			_attrs: {},
+			setAttribute(n, v) { this._attrs[n] = v; },
+			getAttribute(n) { return this._attrs[n] ?? null; },
+		};
+		picker.options.push(registryOption);
+		const putCalls = [];
+		windowStub.fetch = (url, opts) => {
+			if (url === "/api/v1/plugins/install") {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, plugin: { slug: "latency-p95", name: "Latency P95", entry: "dist/index.html", size: "small" }, compatible: true }) });
+			}
+			if (opts?.method === "PUT") { putCalls.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, status: 200 }); }
+			return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ slugs: [] }) });
+		};
+		await sandbox.initWidgetDashboard();
+		picker.value = "registry:latency-p95";
+		await picker._listeners.change[0]();
+
+		assert.equal(grid.children.length, 1);
+		assert.equal(registryOption.value, "latency-p95");
+		assert.equal(registryOption.hidden, true);
+		assert.deepEqual(putCalls[putCalls.length - 1], { slugs: ["latency-p95"] });
 	});
 });
 

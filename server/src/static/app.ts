@@ -442,15 +442,70 @@ function mountPluginFrame(slug: string, entry: string, slot: ShellState["view"])
 	content.appendChild(iframe);
 }
 
-function onPluginPickerChange(slot: ShellState["view"]): void {
+function onPluginPickerChange(slot: ShellState["view"]): Promise<void> | void {
 	const select = document.getElementById(PLUGIN_PICKER_IDS[slot]) as HTMLSelectElement | null;
 	if (!select) return;
+	const raw = select.value;
+	if (raw.startsWith("registry:")) {
+		const registrySlug = raw.slice("registry:".length);
+		const option = select.selectedOptions[0];
+		return installFromRegistry(select, registrySlug).then((plugin) => {
+			if (!plugin) { select.value = ""; return; }
+			if (option) {
+				option.value = plugin.slug;
+				option.textContent = plugin.name;
+				option.setAttribute("data-entry", plugin.entry);
+			}
+			if (currentUnmount) { currentUnmount(); currentUnmount = null; }
+			select.value = plugin.slug;
+			mountPluginFrame(plugin.slug, plugin.entry, slot);
+		});
+	}
 	if (currentUnmount) { currentUnmount(); currentUnmount = null; }
-	const slug = select.value;
-	if (slug === "") { navigateTo(window.location.pathname, false); return; }
+	if (raw === "") { navigateTo(window.location.pathname, false); return; }
 	const option = select.selectedOptions[0];
 	const entry = option?.getAttribute("data-entry") ?? "";
-	mountPluginFrame(slug, entry, slot);
+	mountPluginFrame(raw, entry, slot);
+}
+
+interface InstalledPluginResponse {
+	slug: string;
+	name: string;
+	entry: string;
+	size?: string;
+}
+
+interface InstallApiResponse {
+	ok: boolean;
+	plugin?: InstalledPluginResponse;
+	compatible?: boolean;
+	error?: string;
+}
+
+/** POSTs a registry slug to /api/v1/plugins/install and returns the installed plugin's data, or
+ * null on any failure (network error, non-2xx, or a version-incompatible install) -- the caller
+ * resets its own picker back to "" in that case. Disables `select` for the duration of the
+ * request so a second click can't fire a concurrent install of the same slug. */
+async function installFromRegistry(select: HTMLSelectElement, registrySlug: string): Promise<InstalledPluginResponse | null> {
+	select.disabled = true;
+	try {
+		const res = await window.fetch("/api/v1/plugins/install", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ slug: registrySlug }),
+		});
+		const body = (await res.json().catch(() => null)) as InstallApiResponse | null;
+		if (!res.ok || !body?.ok || !body.plugin || body.compatible === false) {
+			console.error(`Failed to install plugin "${registrySlug}"${body?.error ? `: ${body.error}` : ""}`);
+			return null;
+		}
+		return body.plugin;
+	} catch {
+		console.error(`Failed to install plugin "${registrySlug}": network error`);
+		return null;
+	} finally {
+		select.disabled = false;
+	}
 }
 
 // ---------- Analytics dashboard widgets (installed widget plugins pinned to the Analytics view) ----------
@@ -548,9 +603,24 @@ async function initWidgetDashboard(): Promise<void> {
 	persisted.forEach(addWidget);
 
 	picker.addEventListener("change", () => {
-		const slug = picker.value;
-		if (slug === "") return;
-		if (addWidget(slug)) saveDashboardSlugs(Array.from(cardsBySlug.keys()));
+		const raw = picker.value;
+		if (raw === "") return;
+		if (raw.startsWith("registry:")) {
+			const registrySlug = raw.slice("registry:".length);
+			const option = optionsBySlug.get(raw);
+			return installFromRegistry(picker, registrySlug).then((plugin) => {
+				if (!plugin || !option) { picker.value = ""; return; }
+				option.value = plugin.slug;
+				option.textContent = plugin.name;
+				option.setAttribute("data-entry", plugin.entry);
+				option.setAttribute("data-size", plugin.size ?? "medium");
+				optionsBySlug.delete(raw);
+				optionsBySlug.set(plugin.slug, option);
+				if (addWidget(plugin.slug)) saveDashboardSlugs(Array.from(cardsBySlug.keys()));
+				picker.value = "";
+			});
+		}
+		if (addWidget(raw)) saveDashboardSlugs(Array.from(cardsBySlug.keys()));
 		picker.value = "";
 	});
 }
