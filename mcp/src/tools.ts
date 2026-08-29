@@ -177,7 +177,7 @@ export function buildTrailServer(cfg: TrailConfig, judgeCfg: JudgeConfig | undef
 		return run;
 	}
 
-	const server = new McpServer({ name: "trail", version: "0.2.0" });
+	const server = new McpServer({ name: "trail", version: "0.3.0" });
 
 	server.registerTool(
 		"trail_start_run",

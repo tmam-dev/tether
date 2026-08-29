@@ -100,6 +100,31 @@ Add an instruction to your agent's project rules (e.g. `CLAUDE.md` /
 > `trail_log_llm_call`, and failures with `trail_log_exception`. When the task
 > completes, call `trail_finish_run` with a one-line summary.
 
+## Migrating from 0.2.x to 0.3.0
+
+This is a breaking change to three tool schemas — a caller still passing the
+old string-shaped fields will fail MCP schema validation.
+
+- `trail_log_step`: `input`/`output` now accept any JSON-serializable value
+  (object, array, string, number…) instead of only a string. Structured
+  values are more useful than a pre-truncated summary string — pass the
+  actual tool-call arguments/result object.
+- `trail_log_llm_call`: `prompt` (a string) is now `messages` — an array of
+  `{ role: "system" | "user" | "assistant" | "tool", content: string }`.
+  `completion` (a string) is now a single message object:
+  `{ role: "assistant", content: string, tool_calls?: unknown }`.
+- `trail_log_exception` gains two new optional fields: `stack` (a string)
+  and `context` (any JSON-serializable value — relevant state/variables at
+  the time of failure).
+
+All structured values passed to these three tools are redacted (best-effort
+pattern matching for common secret shapes — API keys, bearer tokens,
+password/token-shaped key-value pairs — never a guarantee) and truncated
+(each string value inside the structure is capped at 16KB) before being
+sent, entirely on the client side; the server stores and renders whatever
+it receives, unmodified. Already-recorded runs from 0.2.x keep rendering
+exactly as they did before — nothing is migrated or rewritten.
+
 ## Notes
 
 - Spans are sent immediately per tool call over HTTPS; the root agent span is
