@@ -100,13 +100,17 @@ entry is a minimal pointer, not a rich catalog record:
   "slug": "waterfall-timeline",
   "repo": "https://github.com/example/tether-plugin-waterfall",
   "description": "Renders a run's spans as a waterfall/timeline view.",
-  "kind": "view",
+  "kind": "panel",
   "slot": "detail"
 }
 ```
 
-- `kind` is `"view"` or `"widget"`; `slot` (`"detail"` | `"harness"` |
-  `"analytics"`) applies only to `kind: "view"` entries.
+- `kind` and `slot` mirror `tether-plugin.json`'s own `kind`/`replaces` fields
+  (`server/src/plugins.ts`'s shipped `PluginManifest`) so a registry entry
+  reads as a preview of the manifest a `plugin add` will install, not a
+  parallel vocabulary: `kind` is `"panel"` or `"widget"`; `slot`
+  (`"detail"` | `"harness"` | `"analytics"`) applies only to `kind:
+  "panel"` entries, matching `replaces`.
 - No author, screenshots, version pin, or category fields — those live in
   the plugin's own `tether-plugin.json` and README, not the index. Keeping
   the index this thin keeps a review PR small and keeps the index from
