@@ -85,3 +85,31 @@ describe("renderAnalyticsBody widget dashboard", () => {
 		assert.match(html, /&lt;script&gt;/);
 	});
 });
+
+function registryWidget(overrides = {}) {
+	return { name: "Latency P95", slug: "latency-p95", repo: "r", description: "p95 latency trend.", kind: "widget", ...overrides };
+}
+
+describe("renderAnalyticsBody widget dashboard — registry", () => {
+	test("renders the section (even with zero installed widgets) when a registry widget exists", () => {
+		const html = renderAnalyticsBody({ totalRuns: 0, trackedRuns: 0, entries: [] }, [], [registryWidget()]);
+		assert.match(html, /id="addWidgetPicker"/);
+		assert.match(html, /<optgroup label="Browse marketplace">/);
+		assert.match(html, /<option value="registry:latency-p95" data-registry-slug="latency-p95" title="p95 latency trend\.">Latency P95 \(install\)<\/option>/);
+	});
+
+	test("renders neither the picker nor the grid when both installed and registry widgets are empty", () => {
+		const html = renderAnalyticsBody({ totalRuns: 0, trackedRuns: 0, entries: [] }, [], []);
+		assert.equal(html.includes("addWidgetPicker"), false);
+	});
+
+	test("escapes a registry widget's name and description", () => {
+		const html = renderAnalyticsBody(
+			{ totalRuns: 0, trackedRuns: 0, entries: [] },
+			[],
+			[registryWidget({ name: "<script>alert(1)</script>", description: "<img onerror=alert(1)>" })]
+		);
+		assert.equal(html.includes("<script>alert(1)</script>"), false);
+		assert.equal(html.includes("<img onerror=alert(1)>"), false);
+	});
+});
