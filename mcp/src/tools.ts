@@ -249,7 +249,7 @@ export function buildTrailServer(cfg: TrailConfig, judgeCfg: JudgeConfig | undef
 		{
 			title: "Log an LLM call",
 			description:
-				"Record an LLM request made during the run, with prompt, completion, model, token usage and cost. " +
+				"Record an LLM request made during the run, with messages, completion, model, token usage and cost. " +
 				"Feeds LLM analytics (tokens, cost) and the trace I/O panel.",
 			inputSchema: {
 				run_id: z.string(),

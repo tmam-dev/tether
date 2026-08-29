@@ -102,20 +102,28 @@ Add an instruction to your agent's project rules (e.g. `CLAUDE.md` /
 
 ## Migrating from 0.2.x to 0.3.0
 
-This is a breaking change to three tool schemas — a caller still passing the
-old string-shaped fields will fail MCP schema validation.
+The `input`/`output`/`prompt`/`completion`/`stack`/`context` fields on
+three tools change shape. Backward compatibility differs per tool — read
+carefully, since not every old-shaped call fails loudly:
 
 - `trail_log_step`: `input`/`output` now accept any JSON-serializable value
-  (object, array, string, number…) instead of only a string. Structured
-  values are more useful than a pre-truncated summary string — pass the
-  actual tool-call arguments/result object.
-- `trail_log_llm_call`: `prompt` (a string) is now `messages` — an array of
-  `{ role: "system" | "user" | "assistant" | "tool", content: string }`.
-  `completion` (a string) is now a single message object:
-  `{ role: "assistant", content: string, tool_calls?: unknown }`.
-- `trail_log_exception` gains two new optional fields: `stack` (a string)
-  and `context` (any JSON-serializable value — relevant state/variables at
-  the time of failure).
+  instead of only a string — **not a breaking change for existing
+  callers**, since a plain string is still a valid value. Pass the actual
+  tool-call arguments/result object instead of a pre-truncated summary
+  string to get the benefit.
+- `trail_log_llm_call`: `completion` (a string) is now a single message
+  object `{ role: "assistant", content: string, tool_calls?: unknown }` —
+  an old string `completion` **fails validation loudly**, as expected.
+  `prompt` (a string) is replaced by `messages` (an array of
+  `{ role: "system" | "user" | "assistant" | "tool", content: string }`) —
+  **a leftover `prompt` field is silently ignored, not an error**: the MCP
+  SDK strips unrecognized fields rather than rejecting them, so an
+  un-migrated caller still passing `prompt` will see its LLM-call events
+  logged with no prompt data at all, not a validation error. Update every
+  `trail_log_llm_call` call site to pass `messages` instead.
+- `trail_log_exception` gains two new optional fields, `stack` (a string)
+  and `context` (any JSON-serializable value) — **purely additive, not a
+  breaking change**.
 
 All structured values passed to these three tools are redacted (best-effort
 pattern matching for common secret shapes — API keys, bearer tokens,

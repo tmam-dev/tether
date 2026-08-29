@@ -104,7 +104,12 @@ Three read-only JSON endpoints, same-origin, no auth, versioned by URL
 prefix (a breaking change would ship as `/api/v2/*`):
 
 - `GET /api/v1/runs/:traceId` — the run: goal, verdict, steps, cost/tokens,
-  plus `coverage` (which harness manifest entries the run touched).
+  plus `coverage` (which harness manifest entries the run touched). As of
+  `trailai-mcp` 0.3.0, each step's `io` pairs (`steps[].io[n][1]`) can be a
+  string, object, array, number, boolean, or null — earlier versions
+  always sent a string. A run logged by a pre-0.3.0 mcp client always has
+  string `io` values; a run logged by 0.3.0+ can have any of those types.
+  A plugin reading `io` should handle both.
 - `GET /api/v1/harness/:traceId` — that run's harness: skills, sub-agents,
   MCP servers.
 - `GET /api/v1/analytics` — usage aggregated across every run in the store.
