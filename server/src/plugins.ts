@@ -234,11 +234,23 @@ function cleanupCloneTarget(cloneTarget: string): void {
 	}
 }
 
-/** Removes any `.tmp-install-*` staging directory left behind under `root` -- normally cleaned up
- * by `cleanupCloneTarget` on every failure path, but a process kill mid-install skips that cleanup
- * entirely. Already invisible to `listInstalledPlugins`/`resolvePluginAssetPath` (both refuse
- * dot-prefixed names), so a leftover one is inert disk usage, not a correctness issue -- this just
- * stops it from accumulating. Best-effort: a sweep failure is not a reason to fail the install. */
+// How old a .tmp-install-* staging directory must be before sweepStaleInstallDirs will remove it.
+// Installs are also triggered over HTTP now (POST /api/v1/plugins/install), so two installs can run
+// concurrently (two browser tabs, two pickers on the same page, ...) -- each one sweeps at its own
+// start, before its own mkdtempSync. Without an age check, install B's sweep could delete install
+// A's still-in-progress staging directory mid-clone. A real git clone --depth 1 finishes in well
+// under this window, so anything still around this long is almost certainly leftover from a
+// crashed/abandoned install (the sweep's original purpose), not a concurrently-running one.
+const STALE_INSTALL_DIR_MAX_AGE_MS = 10 * 60 * 1000;
+
+/** Removes any `.tmp-install-*` staging directory left behind under `root` that's older than
+ * STALE_INSTALL_DIR_MAX_AGE_MS -- normally cleaned up by `cleanupCloneTarget` on every failure path,
+ * but a process kill mid-install skips that cleanup entirely. Already invisible to
+ * `listInstalledPlugins`/`resolvePluginAssetPath` (both refuse dot-prefixed names), so a leftover
+ * one is inert disk usage, not a correctness issue -- this just stops it from accumulating. A young
+ * staging directory is left alone: it may belong to another install running concurrently right now
+ * (see STALE_INSTALL_DIR_MAX_AGE_MS above). Best-effort: a stat/rm failure on one entry is not a
+ * reason to fail the install or skip sweeping the rest. */
 function sweepStaleInstallDirs(root: string): void {
 	let entries: string[];
 	try {
@@ -246,10 +258,14 @@ function sweepStaleInstallDirs(root: string): void {
 	} catch {
 		return;
 	}
+	const now = Date.now();
 	for (const name of entries) {
 		if (!name.startsWith(".tmp-install-")) continue;
+		const path = join(root, name);
 		try {
-			rmSync(join(root, name), { recursive: true, force: true });
+			const { mtimeMs } = statSync(path);
+			if (now - mtimeMs < STALE_INSTALL_DIR_MAX_AGE_MS) continue;
+			rmSync(path, { recursive: true, force: true });
 		} catch {
 			/* best effort */
 		}

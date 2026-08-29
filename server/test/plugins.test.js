@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, existsSync, readdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -365,6 +365,48 @@ describe("installPluginFromGitUrl", () => {
 			const result = installPluginFromGitUrl(join(tmpdir(), "definitely-does-not-exist-" + Date.now()), root);
 			assert.equal(result.ok, false);
 			assert.match(result.error, /git clone failed/);
+		});
+	});
+
+	// Fix 4: installs are now also triggered over HTTP (POST /api/v1/plugins/install), so two
+	// installs can run concurrently -- each one sweeps .tmp-install-* directories at its own start,
+	// before its own mkdtempSync. sweepStaleInstallDirs must not delete a staging directory that
+	// belongs to another install still in progress right now.
+	test("does NOT sweep a .tmp-install-* staging directory with a recent (just-created) mtime", () => {
+		withTempPluginsRoot((root) => {
+			mkdirSync(root, { recursive: true });
+			const inFlight = join(root, ".tmp-install-concurrent");
+			mkdirSync(inFlight);
+			writeFileSync(join(inFlight, "marker"), "from a concurrently-running install");
+
+			const repoDir = makeFixtureRepo("waterfall-view");
+			const result = installPluginFromGitUrl(repoDir, root);
+
+			assert.equal(result.ok, true);
+			// The concurrent install's staging directory must still be there, untouched.
+			assert.equal(existsSync(inFlight), true);
+			assert.equal(existsSync(join(inFlight, "marker")), true);
+			rmSync(repoDir, { recursive: true, force: true });
+		});
+	});
+
+	test("sweeps a .tmp-install-* staging directory old enough to be from a crashed install", () => {
+		withTempPluginsRoot((root) => {
+			mkdirSync(root, { recursive: true });
+			const stale = join(root, ".tmp-install-crashed");
+			mkdirSync(stale);
+			writeFileSync(join(stale, "marker"), "from a crashed install");
+			// Backdate well past the 10-minute staleness threshold.
+			const old = new Date(Date.now() - 60 * 60 * 1000);
+			utimesSync(stale, old, old);
+
+			const repoDir = makeFixtureRepo("waterfall-view");
+			const result = installPluginFromGitUrl(repoDir, root);
+
+			assert.equal(result.ok, true);
+			assert.equal(existsSync(stale), false);
+			assert.deepEqual(readdirSync(root).sort(), ["waterfall-view"]);
+			rmSync(repoDir, { recursive: true, force: true });
 		});
 	});
 });

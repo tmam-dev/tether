@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, statSync, utimesSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { runPluginCommand } from "../dist/cli/plugin-commands.js";
@@ -127,6 +127,13 @@ describe("plugin add", () => {
 			const stale = join(pluginsDir(dataDir), ".tmp-install-leftover");
 			mkdirSync(stale);
 			writeFileSync(join(stale, "marker"), "from a crashed install");
+			// Fix 4: sweepStaleInstallDirs only removes a staging directory old enough that no install
+			// could still be using it (installs can now run concurrently over HTTP), so this "crashed
+			// install" fixture must be backdated past that threshold -- a just-created one (the
+			// default) is deliberately left alone now, see plugins.test.js's dedicated coverage of
+			// that.
+			const old = new Date(Date.now() - 60 * 60 * 1000);
+			utimesSync(stale, old, old);
 
 			const repoDir = makeFixtureRepo("waterfall-view");
 			assert.equal(await runPluginCommand(["add", repoDir], dataDir), 0);
