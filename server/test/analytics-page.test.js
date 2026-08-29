@@ -94,8 +94,10 @@ describe("renderAnalyticsBody widget dashboard — registry", () => {
 	test("renders the section (even with zero installed widgets) when a registry widget exists", () => {
 		const html = renderAnalyticsBody({ totalRuns: 0, trackedRuns: 0, entries: [] }, [], [registryWidget()]);
 		assert.match(html, /id="addWidgetPicker"/);
-		assert.match(html, /<optgroup label="Browse marketplace">/);
-		assert.match(html, /<option value="registry:latency-p95" data-registry-slug="latency-p95" title="p95 latency trend\.">Latency P95 \(install\)<\/option>/);
+		// Spec §4: "listed," not "reviewed"/"verified" -- and the repo URL is shown so a user can see
+		// exactly what they'd be installing from before clicking.
+		assert.match(html, /<optgroup label="Browse marketplace \(listed, not reviewed\)">/);
+		assert.match(html, /<option value="registry:latency-p95" data-registry-slug="latency-p95" title="p95 latency trend\. — r">Latency P95 \(install\)<\/option>/);
 	});
 
 	test("renders neither the picker nor the grid when both installed and registry widgets are empty", () => {

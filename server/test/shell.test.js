@@ -92,8 +92,10 @@ describe("plugin picker", () => {
 		};
 		const html = renderShell({ view: "harness", traceId: "a".repeat(32) }, "Tether", "", "", withRegistry);
 		assert.match(html, /<select id="pluginPickerHarness"/);
-		assert.match(html, /<optgroup label="Browse marketplace">/);
-		assert.match(html, /<option value="registry:waterfall-view" data-registry-slug="waterfall-view" title="A waterfall view\.">Waterfall \(install\)<\/option>/);
+		// Spec §4: "listed," not "reviewed"/"verified" -- and the repo URL is shown so a user can see
+		// exactly what they'd be installing from before clicking.
+		assert.match(html, /<optgroup label="Browse marketplace \(listed, not reviewed\)">/);
+		assert.match(html, /<option value="registry:waterfall-view" data-registry-slug="waterfall-view" title="A waterfall view\. — r">Waterfall \(install\)<\/option>/);
 	});
 
 	test("escapes a registry entry's name and description", () => {

@@ -37,10 +37,10 @@ function widgetDashboard(widgets: WidgetOption[], registryWidgets: RegistryEntry
 		.map((w) => `<option value="${escapeHtml(w.slug)}" data-entry="${escapeHtml(w.entry)}" data-size="${escapeHtml(w.size)}">${escapeHtml(w.name)}</option>`)
 		.join("");
 	const registryOpts = registryWidgets.length
-		? `<optgroup label="Browse marketplace">${registryWidgets
+		? `<optgroup label="Browse marketplace (listed, not reviewed)">${registryWidgets
 				.map(
 					(w) =>
-						`<option value="registry:${escapeHtml(w.slug)}" data-registry-slug="${escapeHtml(w.slug)}" title="${escapeHtml(w.description)}">${escapeHtml(w.name)} (install)</option>`
+						`<option value="registry:${escapeHtml(w.slug)}" data-registry-slug="${escapeHtml(w.slug)}" title="${escapeHtml(w.description)} — ${escapeHtml(w.repo)}">${escapeHtml(w.name)} (install)</option>`
 				)
 				.join("")}</optgroup>`
 		: "";

@@ -259,10 +259,10 @@ function pluginPicker(slot: ShellView, state: ShellState, data: SlotPickerOption
 		.map((o) => `<option value="${escapeHtml(o.slug)}" data-entry="${escapeHtml(o.entry)}">${escapeHtml(o.name)}</option>`)
 		.join("");
 	const registryOpts = data.registry.length
-		? `<optgroup label="Browse marketplace">${data.registry
+		? `<optgroup label="Browse marketplace (listed, not reviewed)">${data.registry
 				.map(
 					(o) =>
-						`<option value="registry:${escapeHtml(o.slug)}" data-registry-slug="${escapeHtml(o.slug)}" title="${escapeHtml(o.description)}">${escapeHtml(o.name)} (install)</option>`
+						`<option value="registry:${escapeHtml(o.slug)}" data-registry-slug="${escapeHtml(o.slug)}" title="${escapeHtml(o.description)} — ${escapeHtml(o.repo)}">${escapeHtml(o.name)} (install)</option>`
 				)
 				.join("")}</optgroup>`
 		: "";
