@@ -37,6 +37,14 @@ if (!isValidRegistryFile(parsed)) {
 console.log(`✓ registry/plugins.json schema is valid (${parsed.entries.length} entr${parsed.entries.length === 1 ? "y" : "ies"}).`);
 
 for (const entry of parsed.entries) {
+	// Enforced here (the trust-boundary layer every real, merged listing must pass through), not in
+	// registry.ts's runtime schema validation -- the existing server.test.js/plugins.test.js fixtures
+	// deliberately use local filesystem paths as `repo` values so they can clone a local repo instead
+	// of hitting the network, and a scheme restriction in isValidRegistryEntry would break those.
+	if (!entry.repo.startsWith("https://")) {
+		fail(`"${entry.slug}": repo "${entry.repo}" must be an https:// URL`);
+		continue;
+	}
 	const cloneDir = mkdtempSync(join(tmpdir(), "tether-registry-ci-"));
 	try {
 		try {
@@ -48,6 +56,12 @@ for (const entry of parsed.entries) {
 		const manifest = readManifest(cloneDir);
 		if (!manifest) {
 			fail(`"${entry.slug}": tether-plugin.json is missing or invalid at the repo root.`);
+		} else if (manifest.slug !== entry.slug) {
+			// Mirrors server.ts's runtime install-route check: the registry entry's own slug (what
+			// the "not yet installed" pickers key on) must match the slug the plugin actually installs
+			// under (the manifest's slug) -- otherwise a listed entry could silently overwrite an
+			// unrelated already-installed plugin.
+			fail(`"${entry.slug}": registry slug doesn't match the manifest's own slug "${manifest.slug}".`);
 		} else {
 			const manifestKind = manifest.kind ?? "panel";
 			if (manifestKind !== entry.kind) {

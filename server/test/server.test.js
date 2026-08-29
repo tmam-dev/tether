@@ -952,4 +952,71 @@ describe("POST /api/v1/plugins/install", () => {
 		}, { pluginsRoot });
 		rmSync(pluginsRoot, { recursive: true, force: true });
 	});
+
+	// Fix 1: a registry entry's own `slug` (what the "not yet installed" pickers key on) must match
+	// the slug the linked repo's manifest actually installs under (join(pluginsRoot, manifest.slug)).
+	// If they differ, the install has already happened by the time this is detected -- the route must
+	// report the mismatch rather than pretend the install matched what the user clicked.
+	test("reports a mismatch (without crashing) when the registry entry's slug differs from the installed manifest's own slug", async () => {
+		const pluginsRoot = mkdtempSync(join(tmpdir(), "tether-plugins-install-"));
+		const repoDir = makeRegistryFixtureRepo("registry-listed-slug", { slug: "actual-manifest-slug" });
+		seedRegistryCache(pluginsRoot, [{ name: "Mismatched Listing", slug: "registry-listed-slug", repo: repoDir, description: "d", kind: "widget" }]);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/plugins/install`, {
+				method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: "registry-listed-slug" }),
+			});
+			const body = await res.json();
+			assert.equal(res.status, 502);
+			assert.equal(body.ok, false);
+			assert.match(body.error, /registry-listed-slug/);
+			assert.match(body.error, /actual-manifest-slug/);
+		}, { pluginsRoot });
+		rmSync(repoDir, { recursive: true, force: true });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	// Fix 2: POST + no/non-JSON Content-Type is a CORS "simple request" -- any web page the browser
+	// has open could otherwise silently trigger a real git clone + filesystem write here.
+	test("400s when Content-Type is missing", async () => {
+		const pluginsRoot = mkdtempSync(join(tmpdir(), "tether-plugins-install-"));
+		seedRegistryCache(pluginsRoot, []);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/plugins/install`, {
+				method: "POST", body: JSON.stringify({ slug: "nope" }),
+			});
+			assert.equal(res.status, 400);
+			assert.equal((await res.json()).ok, false);
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("400s when Content-Type is not application/json (e.g. text/plain)", async () => {
+		const pluginsRoot = mkdtempSync(join(tmpdir(), "tether-plugins-install-"));
+		seedRegistryCache(pluginsRoot, []);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/plugins/install`, {
+				method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ slug: "nope" }),
+			});
+			assert.equal(res.status, 400);
+			assert.equal((await res.json()).ok, false);
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("accepts a Content-Type with a charset suffix (application/json; charset=utf-8)", async () => {
+		const pluginsRoot = mkdtempSync(join(tmpdir(), "tether-plugins-install-"));
+		const repoDir = makeRegistryFixtureRepo("latency-p95-charset");
+		seedRegistryCache(pluginsRoot, [{ name: "Latency P95", slug: "latency-p95-charset", repo: repoDir, description: "d", kind: "widget" }]);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/plugins/install`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json; charset=utf-8" },
+				body: JSON.stringify({ slug: "latency-p95-charset" }),
+			});
+			assert.equal(res.status, 200);
+			assert.equal((await res.json()).ok, true);
+		}, { pluginsRoot });
+		rmSync(repoDir, { recursive: true, force: true });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
 });

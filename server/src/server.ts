@@ -459,6 +459,17 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 		}
 
 		if (req.method === "POST" && pathname === "/api/v1/plugins/install") {
+			// A POST with no Content-Type (or a non-JSON one, e.g. text/plain) is a CORS "simple
+			// request" -- any web page the browser has open could fire one at this local server
+			// without a preflight, triggering a real git clone + filesystem write. Requiring
+			// application/json forces a real cross-origin caller through a preflight this server
+			// doesn't handle, so the browser blocks it before it ever reaches here. Checked before the
+			// body is even read.
+			const contentType = req.headers["content-type"] ?? "";
+			if (!contentType.toLowerCase().startsWith("application/json")) {
+				sendError(res, 400, "Content-Type must be application/json");
+				return;
+			}
 			let parsed: unknown;
 			try {
 				const bodyText = await readBody(req);
@@ -481,6 +492,25 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 				const result = installPluginFromGitUrl(entry.repo, pluginsRoot);
 				if (!result.ok) {
 					sendError(res, 502, result.error);
+					return;
+				}
+				// The registry entry's own slug (used for the "not yet installed" filters elsewhere in
+				// this file) must match the slug the installed manifest actually landed at
+				// (join(pluginsRoot, result.manifest.slug), per installPluginFromGitUrl) -- otherwise a
+				// bad listing could silently overwrite an unrelated already-installed plugin. By this
+				// point the clone has already happened and installPluginFromGitUrl's
+				// rmSync(dest)+renameSync(cloneTarget, dest) may already have overwritten whatever was
+				// at that destination, so there is no data-preserving way to "clean up" here -- removing
+				// the mismatched directory now wouldn't restore anything that was lost, it would just
+				// destroy the mismatched content too (which might be all that's left of a real,
+				// unrelated plugin). So this deliberately does NOT touch disk any further: it only
+				// reports the mismatch so the registry listing can be fixed.
+				if (result.manifest.slug !== entry.slug) {
+					sendError(
+						res,
+						502,
+						`registry entry "${entry.slug}" points to a manifest with a different slug ("${result.manifest.slug}") -- refusing to install`
+					);
 					return;
 				}
 				res.writeHead(200, { "Content-Type": "application/json" });
