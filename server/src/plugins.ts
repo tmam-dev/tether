@@ -5,7 +5,8 @@
  * never thrown, matching this codebase's runs.ts/harness.ts convention.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { basename, extname, join, resolve, sep } from "node:path";
 
 export const TETHER_API_VERSION = 1;
@@ -221,4 +222,89 @@ export function writeDashboardSlugs(pluginsRoot: string, slugs: string[]): boole
 	mkdirSync(pluginsRoot, { recursive: true, mode: 0o700 });
 	writeFileSync(dashboardPath(pluginsRoot), JSON.stringify(slugs, null, 2));
 	return true;
+}
+
+/** Best-effort cleanup of a temp clone dir -- guarded so a cleanup failure never masks the
+ * original error that triggered it. */
+function cleanupCloneTarget(cloneTarget: string): void {
+	try {
+		rmSync(cloneTarget, { recursive: true, force: true });
+	} catch (err) {
+		console.error(`Warning: failed to clean up temp directory "${cloneTarget}": ${(err as Error).message}`);
+	}
+}
+
+/** Removes any `.tmp-install-*` staging directory left behind under `root` -- normally cleaned up
+ * by `cleanupCloneTarget` on every failure path, but a process kill mid-install skips that cleanup
+ * entirely. Already invisible to `listInstalledPlugins`/`resolvePluginAssetPath` (both refuse
+ * dot-prefixed names), so a leftover one is inert disk usage, not a correctness issue -- this just
+ * stops it from accumulating. Best-effort: a sweep failure is not a reason to fail the install. */
+function sweepStaleInstallDirs(root: string): void {
+	let entries: string[];
+	try {
+		entries = readdirSync(root);
+	} catch {
+		return;
+	}
+	for (const name of entries) {
+		if (!name.startsWith(".tmp-install-")) continue;
+		try {
+			rmSync(join(root, name), { recursive: true, force: true });
+		} catch {
+			/* best effort */
+		}
+	}
+}
+
+export type InstallResult = { ok: true; manifest: PluginManifest; versionMismatch: boolean } | { ok: false; error: string };
+
+/** Clones `gitUrl` and installs it under `pluginsRoot` as a plugin, exactly like the CLI's
+ * `plugin add` (which now calls this directly) -- shared so the new /api/v1/plugins/install route
+ * (server.ts) installs a registry entry via the identical validated path, not a second
+ * implementation. Never throws; every failure comes back as `{ ok: false, error }` so a caller
+ * (CLI or HTTP route) can report it however fits that surface. */
+export function installPluginFromGitUrl(gitUrl: string, pluginsRoot: string): InstallResult {
+	// Staged INSIDE pluginsRoot, not the OS temp dir: the final install is a renameSync into this
+	// same directory, and rename(2) fails with EXDEV across filesystems.
+	let cloneTarget: string;
+	try {
+		mkdirSync(pluginsRoot, { recursive: true, mode: 0o700 });
+		sweepStaleInstallDirs(pluginsRoot);
+		cloneTarget = mkdtempSync(join(pluginsRoot, ".tmp-install-"));
+	} catch (err) {
+		return { ok: false, error: `Failed to prepare the plugins directory: ${(err as Error).message}` };
+	}
+
+	try {
+		// `-c protocol.ext.allow=never` disables git's `ext::` transport (arbitrary shell command
+		// execution). `--` stops a gitUrl beginning with `-` from being parsed as a git option.
+		execFileSync("git", ["-c", "protocol.ext.allow=never", "clone", "--depth", "1", "--", gitUrl, cloneTarget], { stdio: "pipe" });
+	} catch (err) {
+		cleanupCloneTarget(cloneTarget);
+		return { ok: false, error: `git clone failed: ${(err as Error).message}` };
+	}
+
+	const manifest = readManifest(cloneTarget);
+	if (!manifest) {
+		cleanupCloneTarget(cloneTarget);
+		return { ok: false, error: "tether-plugin.json is missing or invalid at the repo root." };
+	}
+
+	// manifest.slug comes from the cloned repo's tether-plugin.json -- attacker-controlled remote
+	// content when gitUrl points at a malicious or compromised repo.
+	if (!isPlainSlug(manifest.slug)) {
+		cleanupCloneTarget(cloneTarget);
+		return { ok: false, error: `Refusing to continue: manifest slug "${manifest.slug}" is not a valid plugin slug.` };
+	}
+
+	try {
+		const dest = join(pluginsRoot, manifest.slug);
+		rmSync(dest, { recursive: true, force: true });
+		renameSync(cloneTarget, dest);
+	} catch (err) {
+		cleanupCloneTarget(cloneTarget);
+		return { ok: false, error: `Failed to install plugin into the plugins directory: ${(err as Error).message}` };
+	}
+
+	return { ok: true, manifest, versionMismatch: manifest.tetherApiVersion !== TETHER_API_VERSION };
 }

@@ -1,8 +1,9 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import {
 	TETHER_API_VERSION,
 	pluginsDir,
@@ -15,6 +16,7 @@ import {
 	isPlainSlug,
 	readDashboardSlugs,
 	writeDashboardSlugs,
+	installPluginFromGitUrl,
 } from "../dist/plugins.js";
 
 function withTempPluginsRoot(fn) {
@@ -295,6 +297,74 @@ describe("dashboard slug persistence", () => {
 		withTempPluginsRoot((root) => {
 			assert.equal(writeDashboardSlugs(root, ["cost-trend", "../escape"]), false);
 			assert.deepEqual(readDashboardSlugs(root), []);
+		});
+	});
+});
+
+function makeFixtureRepo(slug = "waterfall-view", manifestOverrides = {}) {
+	const repoDir = mkdtempSync(join(tmpdir(), "tether-plugin-repo-"));
+	execFileSync("git", ["init", "-q"], { cwd: repoDir });
+	execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir });
+	execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir });
+	const manifest = {
+		name: "Waterfall View", slug, version: "1.0.0", author: "test",
+		description: "test plugin", entry: "dist/index.html", replaces: "detail", tetherApiVersion: 1,
+		...manifestOverrides,
+	};
+	writeFileSync(join(repoDir, "tether-plugin.json"), JSON.stringify(manifest));
+	mkdirSync(join(repoDir, "dist"));
+	writeFileSync(join(repoDir, "dist", "index.html"), "<!doctype html><p>waterfall</p>");
+	execFileSync("git", ["add", "-A"], { cwd: repoDir });
+	execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: repoDir });
+	return repoDir;
+}
+
+describe("installPluginFromGitUrl", () => {
+	test("clones a valid plugin repo into the plugins root under its manifest slug", () => {
+		withTempPluginsRoot((root) => {
+			const repoDir = makeFixtureRepo("waterfall-view");
+			const result = installPluginFromGitUrl(repoDir, root);
+			assert.equal(result.ok, true);
+			assert.equal(result.manifest.slug, "waterfall-view");
+			assert.equal(result.versionMismatch, false);
+			assert.ok(existsSync(join(root, "waterfall-view", "tether-plugin.json")));
+			rmSync(repoDir, { recursive: true, force: true });
+		});
+	});
+
+	test("reports versionMismatch true without deleting anything", () => {
+		withTempPluginsRoot((root) => {
+			const repoDir = makeFixtureRepo("future-view", { tetherApiVersion: 99 });
+			const result = installPluginFromGitUrl(repoDir, root);
+			assert.equal(result.ok, true);
+			assert.equal(result.versionMismatch, true);
+			assert.ok(existsSync(join(root, "future-view")));
+			rmSync(repoDir, { recursive: true, force: true });
+		});
+	});
+
+	test("returns ok:false with no installed directory for a repo with no valid manifest", () => {
+		withTempPluginsRoot((root) => {
+			const repoDir = mkdtempSync(join(tmpdir(), "tether-plugin-badrepo-"));
+			execFileSync("git", ["init", "-q"], { cwd: repoDir });
+			execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir });
+			execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir });
+			writeFileSync(join(repoDir, "README.md"), "no manifest here");
+			execFileSync("git", ["add", "-A"], { cwd: repoDir });
+			execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: repoDir });
+
+			const result = installPluginFromGitUrl(repoDir, root);
+			assert.equal(result.ok, false);
+			assert.match(result.error, /missing or invalid/);
+			rmSync(repoDir, { recursive: true, force: true });
+		});
+	});
+
+	test("returns ok:false for a git URL that doesn't resolve", () => {
+		withTempPluginsRoot((root) => {
+			const result = installPluginFromGitUrl(join(tmpdir(), "definitely-does-not-exist-" + Date.now()), root);
+			assert.equal(result.ok, false);
+			assert.match(result.error, /git clone failed/);
 		});
 	});
 });
