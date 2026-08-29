@@ -227,7 +227,7 @@ function mountDetailPanel(runData: RunData): () => void {
 		const insp = $("insp");
 		let inner = '<div class="pin-note"><span>&#9670; pinned to step ' + (i + 1) + '</span><button id="unpin">back to verdict</button></div>';
 		if (s.sig) inner += s.sig.map((sg) => '<div class="io-sig"><span style="color:var(--stuck);display:grid;place-items:center">' + svg(SVG_LOOP, 1.9) + '</span><div><span class="st" style="color:var(--stuck)">Retry loop &times;' + sg.count + '</span><div style="color:var(--ink-2);margin-top:2px">' + escapeHtml(sg.detail) + "</div></div></div>").join("");
-		if (s.io && s.io.length) inner += s.io.map((p) => '<div class="io-kind">' + escapeHtml(p[0]) + '</div><div class="io-block">' + escapeHtml(p[1]) + "</div>").join("");
+		if (s.io && s.io.length) inner += s.io.map((p) => '<div class="io-kind">' + escapeHtml(p[0]) + '</div><div class="io-block">' + escapeHtml(typeof p[1] === "string" ? p[1] : JSON.stringify(p[1])) + "</div>").join("");
 		else inner += '<div class="insp-empty">No input/output recorded for this step.</div>';
 		insp.innerHTML = inner;
 		const un = document.getElementById("unpin");

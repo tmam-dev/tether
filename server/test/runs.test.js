@@ -50,6 +50,22 @@ function llmCallSpan({ traceId, spanId, parentSpanId, model, startNs, endNs, cos
 	return { traceId, spanId, parentSpanId, name: `chat ${model}`, startTimeUnixNano: startNs, endTimeUnixNano: endNs, raw: JSON.stringify(raw) };
 }
 
+function structuredStepSpan({ traceId, spanId, parentSpanId, name, startNs, endNs, toolName, isError, input, output, stack, context }) {
+	const attrs = { "gen_ai.operation.name": toolName ? "execute_tool" : "execute_task" };
+	if (toolName) attrs["gen_ai.tool.name"] = toolName;
+	const events = [];
+	if (input !== undefined) events.push({ name: "gen_ai.content.prompt", timeUnixNano: endNs, attributes: otlpAttrs({ "gen_ai.prompt": JSON.stringify(input) }) });
+	if (output !== undefined) events.push({ name: "gen_ai.content.completion", timeUnixNano: endNs, attributes: otlpAttrs({ "gen_ai.completion": JSON.stringify(output) }) });
+	if (isError) {
+		const excAttrs = { "exception.type": "Error", "exception.message": "step failed" };
+		if (stack) excAttrs["exception.stacktrace"] = stack;
+		events.push({ name: "exception", timeUnixNano: endNs, attributes: otlpAttrs(excAttrs) });
+	}
+	if (context !== undefined) events.push({ name: "gen_ai.content.context", timeUnixNano: endNs, attributes: otlpAttrs({ "gen_ai.context": JSON.stringify(context) }) });
+	const raw = { traceId, spanId, parentSpanId, name, startTimeUnixNano: startNs, endTimeUnixNano: endNs, attributes: otlpAttrs(attrs), events, status: { code: isError ? 2 : 1 } };
+	return { traceId, spanId, parentSpanId, name, startTimeUnixNano: startNs, endTimeUnixNano: endNs, raw: JSON.stringify(raw) };
+}
+
 describe("getRun", () => {
 	test("returns null when no root span exists for the traceId", () => {
 		const dbPath = makeTempDbPath();
@@ -176,6 +192,66 @@ describe("getRun", () => {
 			const step = run.steps[0];
 			assert.equal(step.status, "err");
 			assert.deepEqual(step.io, [["Input", "pytest -x"], ["Output", "1 failed"], ["Error", "step failed"]]);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("decodes JSON-encoded structured input/output into objects, a JSON-encoded plain string into an unquoted string, and leaves pre-Phase-1 legacy plain-string io as-is", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "t8", spanId: "r8", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1100000000000" }));
+			insertSpan(db, structuredStepSpan({ traceId: "t8", spanId: "s1", parentSpanId: "r8", name: "edit auth.py", startNs: "1010000000000", endNs: "1011000000000", toolName: "str_replace auth.py", input: { file: "auth.py", find: "old", replace: "new" }, output: { ok: true } }));
+			insertSpan(db, structuredStepSpan({ traceId: "t8", spanId: "s2", parentSpanId: "r8", name: "check output", startNs: "1012000000000", endNs: "1013000000000", toolName: "echo", output: "just a plain string" }));
+			insertSpan(db, stepSpan({ traceId: "t8", spanId: "s3", parentSpanId: "r8", name: "legacy step", startNs: "1014000000000", endNs: "1015000000000", toolName: "run pytest", prompt: "pytest -x" }));
+			const run = getRun(db, "t8");
+			assert.deepEqual(run.steps[0].io, [["Input", { file: "auth.py", find: "old", replace: "new" }], ["Output", { ok: true }]]);
+			assert.deepEqual(run.steps[1].io, [["Output", "just a plain string"]]);
+			assert.deepEqual(run.steps[2].io, [["Input", "pytest -x"]]);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("extracts exception.stacktrace as a Stack io pair when present, after the Error pair", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "t9", spanId: "r9", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1100000000000" }));
+			insertSpan(db, structuredStepSpan({ traceId: "t9", spanId: "s1", parentSpanId: "r9", name: "run build", startNs: "1010000000000", endNs: "1011000000000", toolName: "npm run build", isError: true, stack: "Error: boom\n  at build.js:1:1" }));
+			const run = getRun(db, "t9");
+			assert.deepEqual(run.steps[0].io, [["Error", "step failed"], ["Stack", "Error: boom\n  at build.js:1:1"]]);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("a failed step with no stack trace gets no Stack io pair", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "t10", spanId: "r10", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1100000000000" }));
+			insertSpan(db, structuredStepSpan({ traceId: "t10", spanId: "s1", parentSpanId: "r10", name: "run build", startNs: "1010000000000", endNs: "1011000000000", toolName: "npm run build", isError: true }));
+			const run = getRun(db, "t10");
+			assert.deepEqual(run.steps[0].io, [["Error", "step failed"]]);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("extracts gen_ai.content.context as a Context io pair with a decoded structured value", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "t11", spanId: "r11", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1100000000000" }));
+			insertSpan(db, structuredStepSpan({ traceId: "t11", spanId: "s1", parentSpanId: "r11", name: "exception", startNs: "1010000000000", endNs: "1011000000000", context: { attempt: 3 } }));
+			const run = getRun(db, "t11");
+			assert.deepEqual(run.steps[0].io, [["Context", { attempt: 3 }]]);
 		} finally {
 			db.close();
 			rmSync(join(dbPath, ".."), { recursive: true, force: true });

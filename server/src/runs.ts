@@ -23,7 +23,7 @@ export interface StepView {
 	dur: number;
 	cost: number | null;
 	tok: number | null;
-	io: [string, string][];
+	io: [string, string | unknown][];
 	sig?: RetrySignal[];
 	sourceType?: "skill" | "sub_agent" | "mcp_server";
 	sourceName?: string;
@@ -155,15 +155,32 @@ function parseRaw(raw: string): { attrs: AttrMap; events: { name: string; attrib
 	}
 }
 
-function buildStepIo(events: { name: string; attributes: AttrMap }[]): [string, string][] {
-	const io: [string, string][] = [];
+/** Decodes a stored gen_ai.* string value: a Phase-1-or-later value is JSON.stringify'd structured
+ * data (a string leaf always round-trips quoted, e.g. "hello", which distinguishes it from legacy
+ * plain text that's never valid JSON on its own); a JSON.parse failure means it's a pre-Phase-1
+ * plain string, passed through unchanged so already-ingested runs keep rendering as before. */
+export function decodeIoValue(raw: string): string | unknown {
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return raw;
+	}
+}
+
+function buildStepIo(events: { name: string; attributes: AttrMap }[]): [string, string | unknown][] {
+	const io: [string, string | unknown][] = [];
 	for (const e of events) {
 		if (e.name === "gen_ai.content.prompt" && typeof e.attributes["gen_ai.prompt"] === "string") {
-			io.push(["Input", e.attributes["gen_ai.prompt"] as string]);
+			io.push(["Input", decodeIoValue(e.attributes["gen_ai.prompt"] as string)]);
 		} else if (e.name === "gen_ai.content.completion" && typeof e.attributes["gen_ai.completion"] === "string") {
-			io.push(["Output", e.attributes["gen_ai.completion"] as string]);
+			io.push(["Output", decodeIoValue(e.attributes["gen_ai.completion"] as string)]);
 		} else if (e.name === "exception" && typeof e.attributes["exception.message"] === "string") {
 			io.push(["Error", e.attributes["exception.message"] as string]);
+			if (typeof e.attributes["exception.stacktrace"] === "string") {
+				io.push(["Stack", e.attributes["exception.stacktrace"] as string]);
+			}
+		} else if (e.name === "gen_ai.content.context" && typeof e.attributes["gen_ai.context"] === "string") {
+			io.push(["Context", decodeIoValue(e.attributes["gen_ai.context"] as string)]);
 		}
 	}
 	return io;
