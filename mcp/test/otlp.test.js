@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { sendSpan } from "../dist/otlp.js";
+import { sendSpan, buildPayload } from "../dist/otlp.js";
 
 function stubFetch(impl) {
 	const original = globalThis.fetch;
@@ -76,5 +76,26 @@ describe("sendSpan", () => {
 		} finally {
 			restore();
 		}
+	});
+});
+
+describe("buildPayload — exception stacktrace", () => {
+	test("adds an exception.stacktrace attribute when error.stack is set", () => {
+		const payload = buildPayload(
+			{ url: "http://localhost:4319", environment: "default", serviceName: "test" },
+			{ ...BASE_SPAN, error: { message: "boom", type: "BuildError", stack: "Error: boom\n  at build.js:1:1" } },
+		);
+		const exceptionEvent = payload.resourceSpans[0].scopeSpans[0].spans[0].events.find((e) => e.name === "exception");
+		const stackAttr = exceptionEvent.attributes.find((a) => a.key === "exception.stacktrace");
+		assert.equal(stackAttr.value.stringValue, "Error: boom\n  at build.js:1:1");
+	});
+
+	test("omits exception.stacktrace entirely when error.stack is not set", () => {
+		const payload = buildPayload(
+			{ url: "http://localhost:4319", environment: "default", serviceName: "test" },
+			{ ...BASE_SPAN, error: { message: "boom", type: "BuildError" } },
+		);
+		const exceptionEvent = payload.resourceSpans[0].scopeSpans[0].spans[0].events.find((e) => e.name === "exception");
+		assert.equal(exceptionEvent.attributes.some((a) => a.key === "exception.stacktrace"), false);
 	});
 });

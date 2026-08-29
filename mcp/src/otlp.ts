@@ -57,7 +57,7 @@ export interface SpanInput {
 	endTimeUnixNano: string;
 	attributes: Record<string, AttrValue | undefined>;
 	events?: SpanEvent[];
-	error?: { message: string; type?: string };
+	error?: { message: string; type?: string; stack?: string };
 }
 
 /** Build a complete OTLP/JSON ExportTraceServiceRequest for one span. */
@@ -75,6 +75,7 @@ export function buildPayload(cfg: TrailConfig, span: SpanInput) {
 			attributes: toAttributes({
 				"exception.type": span.error.type ?? "Error",
 				"exception.message": span.error.message,
+				"exception.stacktrace": span.error.stack,
 			}),
 		});
 	}
