@@ -695,7 +695,7 @@ function addPlugin(gitUrl: string, dataDir: string): number {
 }
 ```
 
-Note: `execFileSync`, `mkdtempSync`, `renameSync` are no longer used in `plugin-commands.ts` after this change — remove them from its `node:fs`/`node:child_process` imports (keep `mkdirSync`, `readdirSync`, `rmSync`, `existsSync`, which `removePlugin`/`devPlugin`/`rejectBadSlug` still use).
+Note: after this change, `plugin-commands.ts` no longer uses `execFileSync` (node:child_process) or `mkdtempSync`/`mkdirSync`/`readdirSync`/`renameSync` (node:fs) anywhere in the file — `cleanupCloneTarget`, `sweepStaleInstallDirs`, and `addPlugin`'s body were their only call sites, and all three moved to `plugins.ts`. Remove the `node:child_process` import entirely and narrow the `node:fs` import to just `existsSync, rmSync` — the only two `removePlugin`/`devPlugin` still use (verify with `grep -n "mkdirSync\|readdirSync\|rmSync\|existsSync\|execFileSync\|mkdtempSync\|renameSync" server/src/cli/plugin-commands.ts` after editing: every remaining hit should be `existsSync` or `rmSync`).
 
 - [ ] **Step 5: Build and run both the new and existing tests**
 
