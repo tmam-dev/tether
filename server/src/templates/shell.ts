@@ -211,6 +211,18 @@ const STYLE = `
 	.io-sig { display: flex; align-items: flex-start; gap: 9px; border-radius: 9px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; background: var(--panel-2); border: 1px solid var(--line); }
 	.io-sig svg { width: 17px; height: 17px; flex: none; margin-top: 1px; }
 	.io-sig .st { font-weight: 600; }
+	.io-json { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; font-family: var(--mono); font-size: 12px; line-height: 1.6; overflow-x: auto; }
+	.jv-node > summary { cursor: pointer; color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+	.jv-children { margin: 4px 0 0 14px; border-left: 1px solid var(--line); padding-left: 10px; }
+	.jv-row { margin: 2px 0; }
+	.jv-key { color: var(--ink-3); margin-right: 6px; }
+	.jv-str { color: var(--ink); }
+	.jv-scalar { color: var(--ink-2); }
+	.jv-null { color: var(--ink-3); font-style: italic; }
+	.jv-punct { color: var(--ink-3); }
+	.msg-row { border: 1px solid var(--line); border-radius: 9px; margin-bottom: 8px; overflow: hidden; }
+	.msg-row > summary { cursor: pointer; padding: 6px 12px; background: var(--panel-2); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); }
+	.msg-row .io-block { border: none; border-radius: 0; border-top: 1px solid var(--line); }
 	.insp-empty { color: var(--ink-3); font-size: 13px; }
 	.cov-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 13px; }
 	.cov-status { color: var(--ink-3); font-family: var(--mono); font-size: 11.5px; }
