@@ -9,7 +9,15 @@
   today's "you already know the git URL" model — not the plugin execution
   model itself (shipped, see the 2026-08-26 plugin-view-system spec) and
   not the analytics widget dashboard (shipped separately, see the
-  2026-08-29 widget-dashboard spec).
+  2026-08-29 widget-dashboard spec). No `mcp/` involvement — the registry
+  is entirely a `server/` concern (CLI + web UI); a coding agent does not
+  discover or install plugins through MCP.
+- **Decided since this was opened:** the index lives in this repo (§3, no
+  longer "not decided"); the fetch mechanism is the hybrid — a bundled
+  snapshot for offline/first-run, refreshed live from a CDN URL when
+  online (§3, no longer open); no MCP involvement (above). Still open:
+  registry entry schema, whether an in-app browse UI is worth building
+  yet, and listing removal — see §7.
 
 ---
 
@@ -57,30 +65,26 @@ maintenance cost. This was explicitly NOT settled as "vendoring is the
 primary path" — the brainstorm confirmed index-only as primary before
 being paused.
 
-## 3. Where the index lives and how it's fetched
+## 3. Where the index lives and how it's fetched — DECIDED
 
-Following from §2 (index-only, no Tether-run backend): the index is a
-file — tentatively `registry/plugins.json` — living in a Tether-owned git
-repo (either this repo, or a dedicated `tether-plugins-registry` repo if
-PR traffic should be isolated from the main codebase; not decided).
-Community contribution is a pull request adding one entry.
+The index is a file — tentatively `registry/plugins.json` — living in
+**this repo**, not a separate registry repo. Community contribution is a
+pull request adding one entry; a maintainer reviews and merges it directly
+into this repo, so a listing lives (and is visible) alongside the rest of
+the project.
 
-**Fetch mechanism (not settled — three options were on the table):**
+**Fetch mechanism: hybrid.** A snapshot of the registry file ships bundled
+in the `trailai-tether` npm package for offline/first-run use (so the
+feature never hard-depends on network access, consistent with Tether's
+"no install beyond Node" pitch), and the CLI/server opportunistically
+refreshes it live from a CDN-fronted static URL (e.g. jsdelivr against
+this repo) when online — so a merged PR becomes visible without waiting
+on the next npm release, while a disconnected user still sees whatever
+was bundled at their last install/upgrade.
 
-1. Fetched live from a CDN-fronted static URL (e.g. jsdelivr against the
-   GitHub repo) by the CLI/server at request time. Always fresh — a merged
-   PR is visible immediately, without waiting on an npm release. Requires
-   one network call; still not a Tether-run service, just a static file.
-2. Bundled into the `trailai-tether` npm package at publish time. Fully
-   offline, zero network calls ever — but the list is only as fresh as the
-   user's last install/upgrade.
-3. Both: a bundled snapshot for offline/first-run use, opportunistically
-   refreshed live when online.
-
-The brainstorm leaned toward (1) or (3) — live-fetch matters because the
-whole point of easy community contribution is that a merged PR should be
-visible without gating it behind a Tether release — but this was not
-formally decided against the alternatives.
+Not yet decided: exact refresh cadence/trigger for the live half (on every
+CLI invocation? cached with a TTL? only on an explicit "refresh" command?)
+— see §7.
 
 ## 4. Review process for a registry entry
 
@@ -135,13 +139,13 @@ an OSS project shouldn't carry.
 
 ## 7. What's genuinely unresolved
 
-This proposal stops well short of a committed design. Open items, in
-roughly the order they'd need deciding to move forward:
+Repo location, fetch mechanism, and MCP scope are decided (§3, top status
+block). Still open, in roughly the order they'd need deciding to move
+forward:
 
-- Repo location for the index: this repo vs. a dedicated registry repo.
-- Fetch mechanism: live-only, bundled-only, or hybrid (§3).
 - Exact `tether-plugin.json`-adjacent schema for a registry entry (field
   list, versioning story for the index format itself).
+- Refresh cadence/trigger for the live half of the hybrid fetch (§3).
 - Whether the in-app "Browse plugins" UI (§5) is worth building before
   there's any real plugin volume to browse, or whether a simple markdown
   list in this repo is sufficient until the ecosystem has more than a
