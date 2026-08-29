@@ -5,16 +5,47 @@ import { buildStepSpan, buildLlmCallSpan, buildExceptionSpan } from "../dist/too
 const RUN = { traceId: "t".repeat(32), rootSpanId: "r".repeat(16), agent: "coding-agent" };
 
 describe("buildStepSpan", () => {
-	test("sets gen_ai.tool.name and prompt/completion events for a successful tool step", () => {
+	test("sets gen_ai.tool.name and JSON-encodes string prompt/completion events for a successful tool step", () => {
 		const span = buildStepSpan(RUN, "s1", "1000000000", "2000000000", {
 			name: "run pytest", kind: "tool", input: "pytest -x", output: "1 failed", status: "ok",
 		});
 		assert.equal(span.attributes["gen_ai.tool.name"], "run pytest");
 		assert.deepEqual(span.events, [
-			{ name: "gen_ai.content.prompt", attributes: { "gen_ai.prompt": "pytest -x" } },
-			{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": "1 failed" } },
+			{ name: "gen_ai.content.prompt", attributes: { "gen_ai.prompt": JSON.stringify("pytest -x") } },
+			{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": JSON.stringify("1 failed") } },
 		]);
 		assert.equal(span.error, undefined);
+	});
+
+	test("structured object input/output are JSON-encoded into the prompt/completion events", () => {
+		const span = buildStepSpan(RUN, "s8", "1000000000", "2000000000", {
+			name: "edit auth.py", kind: "tool", status: "ok",
+			input: { file: "auth.py", find: "old", replace: "new" },
+			output: { ok: true, linesChanged: 3 },
+		});
+		assert.deepEqual(span.events, [
+			{ name: "gen_ai.content.prompt", attributes: { "gen_ai.prompt": JSON.stringify({ file: "auth.py", find: "old", replace: "new" }) } },
+			{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": JSON.stringify({ ok: true, linesChanged: 3 }) } },
+		]);
+	});
+
+	test("a secret-shaped string inside a structured input is redacted before encoding", () => {
+		const span = buildStepSpan(RUN, "s9", "1000000000", "2000000000", {
+			name: "call api", kind: "tool", status: "ok",
+			input: { headers: { Authorization: "Bearer abcxyz1234567890" } },
+		});
+		const decoded = JSON.parse(span.events[0].attributes["gen_ai.prompt"]);
+		assert.equal(decoded.headers.Authorization, "[REDACTED]");
+	});
+
+	test("falsy-but-present values (0, false, empty string) still produce an event, not get dropped", () => {
+		const span = buildStepSpan(RUN, "s10", "1000000000", "2000000000", { name: "check exit code", kind: "tool", status: "ok", output: 0 });
+		assert.deepEqual(span.events, [{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": "0" } }]);
+	});
+
+	test("absent input/output produces no io events", () => {
+		const span = buildStepSpan(RUN, "s11", "1000000000", "2000000000", { name: "plan", kind: "task", status: "ok" });
+		assert.deepEqual(span.events, []);
 	});
 
 	test("omits gen_ai.tool.name for a task step", () => {
