@@ -60,6 +60,15 @@ describe("sanitize — truncation", () => {
 		const out = sanitize(s, 16384);
 		assert.match(out, /…\[truncated, 30000b\]$/);
 	});
+
+	test("truncation at a mid-character boundary does not produce U+FFFD replacement characters", () => {
+		// 16384 is not a multiple of 3 (each "€" is 3 UTF-8 bytes), so slicing at 16384
+		// would normally split a character in half, producing U+FFFD. This test verifies
+		// that such replacement characters are stripped from the output.
+		const s = "€".repeat(10000); // 30000 bytes
+		const out = sanitize(s, 16384);
+		assert.doesNotMatch(out, /�/, "output must not contain U+FFFD replacement character");
+	});
 });
 
 describe("sanitize — structure preservation", () => {
