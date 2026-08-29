@@ -11,6 +11,8 @@ import { basename, extname, join, resolve, sep } from "node:path";
 export const TETHER_API_VERSION = 1;
 
 const REPLACES_SLOTS = new Set(["detail", "harness", "analytics"]);
+const KINDS = new Set(["panel", "widget"]);
+const SIZES = new Set(["small", "medium", "large"]);
 
 // isPlainSlug also refuses these outright: readDevOverrides already installs entries via
 // defineProperty so `overrides[slug]` can never resolve to something inherited from
@@ -29,7 +31,9 @@ export interface PluginManifest {
 	description: string;
 	entry: string;
 	icon?: string;
-	replaces: "detail" | "harness" | "analytics";
+	replaces?: "detail" | "harness" | "analytics";
+	kind?: "panel" | "widget";
+	size?: "small" | "medium" | "large";
 	tetherApiVersion: number;
 }
 
@@ -63,17 +67,19 @@ export function isPlainSlug(slug: string): boolean {
 function isValidManifest(v: unknown): v is PluginManifest {
 	if (typeof v !== "object" || v === null) return false;
 	const m = v as Record<string, unknown>;
-	return (
+	const baseValid =
 		typeof m.name === "string" &&
 		typeof m.slug === "string" &&
 		typeof m.version === "string" &&
 		typeof m.author === "string" &&
 		typeof m.description === "string" &&
 		typeof m.entry === "string" &&
-		typeof m.replaces === "string" &&
-		REPLACES_SLOTS.has(m.replaces) &&
-		typeof m.tetherApiVersion === "number"
-	);
+		typeof m.tetherApiVersion === "number";
+	if (!baseValid) return false;
+	if (m.kind !== undefined && !KINDS.has(m.kind as string)) return false;
+	const kind = (m.kind as "panel" | "widget" | undefined) ?? "panel";
+	if (kind === "widget") return typeof m.size === "string" && SIZES.has(m.size);
+	return typeof m.replaces === "string" && REPLACES_SLOTS.has(m.replaces);
 }
 
 /** Reads and validates tether-plugin.json in `pluginDir`. Never throws -- a missing file,

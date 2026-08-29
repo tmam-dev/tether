@@ -90,6 +90,54 @@ describe("readManifest", () => {
 			assert.equal(manifest.replaces, "detail");
 		});
 	});
+
+	describe("manifest kind/size validation", () => {
+		test("a manifest with no kind field validates as a panel (backward compatible) and still requires replaces", () => {
+			withTempPluginsRoot((root) => {
+				installFixturePlugin(root, "legacy-panel");
+				const [plugin] = listInstalledPlugins(root);
+				assert.equal(plugin.replaces, "detail");
+				assert.equal(plugin.kind, undefined);
+			});
+		});
+
+		test("a panel manifest missing replaces is rejected", () => {
+			withTempPluginsRoot((root) => {
+				installFixturePlugin(root, "broken-panel", { replaces: undefined });
+				assert.equal(listInstalledPlugins(root).length, 0);
+			});
+		});
+
+		test("a widget manifest with a valid size and no replaces is accepted", () => {
+			withTempPluginsRoot((root) => {
+				installFixturePlugin(root, "cost-trend", { kind: "widget", size: "medium", replaces: undefined });
+				const [plugin] = listInstalledPlugins(root);
+				assert.equal(plugin.kind, "widget");
+				assert.equal(plugin.size, "medium");
+			});
+		});
+
+		test("a widget manifest missing size is rejected", () => {
+			withTempPluginsRoot((root) => {
+				installFixturePlugin(root, "no-size", { kind: "widget", replaces: undefined });
+				assert.equal(listInstalledPlugins(root).length, 0);
+			});
+		});
+
+		test("a widget manifest with an invalid size is rejected", () => {
+			withTempPluginsRoot((root) => {
+				installFixturePlugin(root, "bad-size", { kind: "widget", size: "huge", replaces: undefined });
+				assert.equal(listInstalledPlugins(root).length, 0);
+			});
+		});
+
+		test("a manifest with an unrecognized kind is rejected", () => {
+			withTempPluginsRoot((root) => {
+				installFixturePlugin(root, "bad-kind", { kind: "bogus" });
+				assert.equal(listInstalledPlugins(root).length, 0);
+			});
+		});
+	});
 });
 
 describe("listInstalledPlugins", () => {
