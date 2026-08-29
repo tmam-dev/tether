@@ -56,10 +56,10 @@ class FakeElement {
 	getAttribute(n) { return this._attrs[n] ?? null; }
 	addEventListener(type, fn) { (this._listeners[type] ??= []).push(fn); }
 	removeEventListener() {}
-	appendChild(child) { this.children.push(child); return child; }
+	appendChild(child) { this.children.push(child); child._parent = this; return child; }
 	querySelectorAll() { return []; }
 	querySelector() { return null; }
-	remove() {}
+	remove() { if (this._parent) { this._parent.children = this._parent.children.filter((c) => c !== this); this._parent = null; } }
 	scrollIntoView() {}
 	getBoundingClientRect() { return { left: 0, width: 100 }; }
 }
@@ -71,6 +71,32 @@ class FakeSelectElement extends FakeElement {
 		this.value = "";
 	}
 	get selectedOptions() { return this._options.filter((o) => o.value === this.value); }
+}
+
+class FakeOptionElement {
+	constructor(value, text, dataset) {
+		this.value = value;
+		this.textContent = text;
+		this.hidden = false;
+		this._attrs = { "data-entry": dataset.entry, "data-size": dataset.size };
+	}
+	getAttribute(n) { return this._attrs[n] ?? null; }
+}
+
+/** Seeds `elements.addWidgetPicker` (a FakeSelectElement with two real-ish `.options`: a blank
+ * placeholder and one installed "cost-trend" widget) and `elements.widgetGrid` (a plain
+ * FakeElement), the way Task 4's server-rendered analytics fragment would. Returns both so a test
+ * can assert on them directly. */
+function seedWidgetPicker(elements) {
+	const picker = new FakeSelectElement("addWidgetPicker");
+	picker.options = [
+		new FakeOptionElement("", "Add widget…", {}),
+		new FakeOptionElement("cost-trend", "Cost Trend", { entry: "dist/index.html", size: "medium" }),
+	];
+	elements.addWidgetPicker = picker;
+	const grid = new FakeElement("widgetGrid");
+	elements.widgetGrid = grid;
+	return { picker, grid };
 }
 
 /** Loads app.js fresh into an isolated vm context with a minimal fake DOM, returning
@@ -522,5 +548,72 @@ describe("plugin picker", () => {
 		assert.equal((windowListeners.mouseup ?? []).length, 0);
 		assert.equal(elements.content.children.length, 1);
 		assert.equal(elements.content.children[0].src, `/plugins/waterfall-view/dist/index.html?traceId=${"a".repeat(32)}`);
+	});
+});
+
+describe("initWidgetDashboard", () => {
+	test("does nothing when the analytics view has no widget grid/picker (e.g. Detail/Harness)", async () => {
+		const { sandbox } = loadApp();
+		await assert.doesNotReject(sandbox.initWidgetDashboard());
+	});
+
+	test("mounts one iframe per persisted slug, in order, and hides its picker option", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		const { picker, grid } = seedWidgetPicker(elements);
+		windowStub.fetch = (url) =>
+			Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ slugs: ["cost-trend"] }) });
+		await sandbox.initWidgetDashboard();
+		assert.equal(grid.children.length, 1);
+		assert.equal(picker.options[1].hidden, true);
+	});
+
+	test("a stale persisted slug with no matching installed widget is skipped, not thrown", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		const { grid } = seedWidgetPicker(elements);
+		windowStub.fetch = (url) =>
+			Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ slugs: ["long-gone"] }) });
+		await assert.doesNotReject(sandbox.initWidgetDashboard());
+		assert.equal(grid.children.length, 0);
+	});
+
+	test("a fetch failure leaves the grid empty instead of throwing", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		const { grid } = seedWidgetPicker(elements);
+		windowStub.fetch = () => Promise.reject(new Error("network down"));
+		await assert.doesNotReject(sandbox.initWidgetDashboard());
+		assert.equal(grid.children.length, 0);
+	});
+
+	test("choosing a widget in the picker adds it to the grid, hides its option, and PUTs the new list", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		const { picker, grid } = seedWidgetPicker(elements);
+		const putCalls = [];
+		windowStub.fetch = (url, opts) => {
+			if (opts?.method === "PUT") { putCalls.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, status: 200 }); }
+			return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ slugs: [] }) });
+		};
+		await sandbox.initWidgetDashboard();
+		picker.value = "cost-trend";
+		picker._listeners.change[0]();
+		assert.equal(grid.children.length, 1);
+		assert.equal(picker.options[1].hidden, true);
+		assert.deepEqual(putCalls[putCalls.length - 1], { slugs: ["cost-trend"] });
+	});
+
+	test("clicking a widget card's remove button removes it from the grid, unhides its option, and PUTs the new list", async () => {
+		const { elements, windowStub, sandbox } = loadApp();
+		const { picker, grid } = seedWidgetPicker(elements);
+		const putCalls = [];
+		windowStub.fetch = (url, opts) => {
+			if (opts?.method === "PUT") { putCalls.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, status: 200 }); }
+			return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ slugs: ["cost-trend"] }) });
+		};
+		await sandbox.initWidgetDashboard();
+		assert.equal(grid.children.length, 1);
+		const removeBtn = grid.children[0].children[0].children[0];
+		removeBtn._listeners.click[0]();
+		assert.equal(grid.children.length, 0);
+		assert.equal(picker.options[1].hidden, false);
+		assert.deepEqual(putCalls[putCalls.length - 1], { slugs: [] });
 	});
 });

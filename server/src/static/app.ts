@@ -416,6 +416,108 @@ function onPluginPickerChange(slot: ShellState["view"]): void {
 	mountPluginFrame(slug, entry, slot);
 }
 
+// ---------- Analytics dashboard widgets (installed widget plugins pinned to the Analytics view) ----------
+
+interface DashboardResponse {
+	slugs: string[];
+}
+
+function widgetGridSpanClass(size: string): string {
+	return size === "large" ? "widget-cell-large" : size === "small" ? "widget-cell-small" : "widget-cell-medium";
+}
+
+function buildWidgetCard(slug: string, name: string, entry: string, size: string, onRemove: (slug: string) => void): HTMLElement {
+	const card = document.createElement("div") as HTMLDivElement;
+	card.className = `widget-card ${widgetGridSpanClass(size)}`;
+	const head = document.createElement("div") as HTMLDivElement;
+	head.className = "widget-card-head";
+	head.textContent = name;
+	const removeBtn = document.createElement("button") as HTMLButtonElement;
+	removeBtn.setAttribute("type", "button");
+	removeBtn.className = "widget-remove";
+	removeBtn.setAttribute("aria-label", `Remove ${name}`);
+	removeBtn.textContent = "×";
+	removeBtn.addEventListener("click", () => onRemove(slug));
+	head.appendChild(removeBtn);
+	const iframe = document.createElement("iframe") as HTMLIFrameElement;
+	iframe.className = "plugin-frame widget-frame";
+	iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+	iframe.src = `/plugins/${encodeURIComponent(slug)}/${entry}`;
+	card.appendChild(head);
+	card.appendChild(iframe);
+	return card;
+}
+
+async function saveDashboardSlugs(slugs: string[]): Promise<void> {
+	try {
+		await window.fetch("/api/v1/dashboard/analytics", {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ slugs }),
+		});
+	} catch {
+		// Best-effort -- the in-memory grid is still correct even if the save failed; the next
+		// page load falls back to whatever was last persisted successfully.
+	}
+}
+
+async function initWidgetDashboard(): Promise<void> {
+	const gridEl = document.getElementById("widgetGrid") as HTMLDivElement | null;
+	const picker = document.getElementById("addWidgetPicker") as HTMLSelectElement | null;
+	if (!gridEl || !picker || !picker.options) return;
+	// Rebind to a variable TypeScript can prove is non-null inside the addWidget closure below --
+	// control-flow narrowing from the guard above doesn't persist into a nested function
+	// declaration, since gridEl _could_ theoretically be reassigned by the time addWidget runs
+	// (it can't, being const, but the checker doesn't special-case that across closures).
+	const grid = gridEl;
+
+	const optionsBySlug = new Map<string, HTMLOptionElement>();
+	Array.from(picker.options).forEach((o) => {
+		if (o.value) optionsBySlug.set(o.value, o);
+	});
+	const cardsBySlug = new Map<string, HTMLElement>();
+
+	function removeWidget(slug: string): void {
+		const card = cardsBySlug.get(slug);
+		if (card) {
+			card.remove();
+			cardsBySlug.delete(slug);
+		}
+		const option = optionsBySlug.get(slug);
+		if (option) option.hidden = false;
+		saveDashboardSlugs(Array.from(cardsBySlug.keys()));
+	}
+
+	function addWidget(slug: string): boolean {
+		if (cardsBySlug.has(slug)) return false;
+		const option = optionsBySlug.get(slug);
+		if (!option) return false; // stale/uninstalled -- silently skip, matches the server's own skip convention
+		const entry = option.getAttribute("data-entry") ?? "";
+		const size = option.getAttribute("data-size") ?? "medium";
+		const card = buildWidgetCard(slug, option.textContent ?? slug, entry, size, removeWidget);
+		grid.appendChild(card);
+		cardsBySlug.set(slug, card);
+		option.hidden = true;
+		return true;
+	}
+
+	let persisted: string[] = [];
+	try {
+		const res = await window.fetch("/api/v1/dashboard/analytics");
+		if (res.ok) persisted = ((await res.json()) as DashboardResponse).slugs;
+	} catch {
+		persisted = [];
+	}
+	persisted.forEach(addWidget);
+
+	picker.addEventListener("change", () => {
+		const slug = picker.value;
+		if (slug === "") return;
+		if (addWidget(slug)) saveDashboardSlugs(Array.from(cardsBySlug.keys()));
+		picker.value = "";
+	});
+}
+
 // Invariant that must hold on both this client-updated version and shell.ts's topbar()'s
 // server-rendered version: no `href` attribute on the Harness tab iff aria-disabled="true".
 // onRailOrTabClick's disabled check and any code doing `new URL(anchor.href)` on this tab depend
@@ -500,6 +602,7 @@ async function navigateTo(pathname: string, push: boolean): Promise<void> {
 		document.title = "Tether — Harness";
 	} else {
 		document.title = "Tether — Analytics";
+		void initWidgetDashboard();
 	}
 
 	currentState = target.view === "detail" ? { view: "detail", traceId: resolvedTraceId } : target;
@@ -555,6 +658,7 @@ function init(): void {
 	});
 
 	if (currentState.view === "detail") mountRunDataIfPresent();
+	if (currentState.view === "analytics") void initWidgetDashboard();
 	setPluginPickerVisibility(currentState.view);
 }
 
