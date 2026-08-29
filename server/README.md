@@ -92,7 +92,9 @@ same-origin.
 | `author` | yes | Free-form author string. |
 | `description` | yes | One-line description of the view. |
 | `entry` | yes | Path (relative to the repo root) of the HTML file the iframe loads. |
-| `replaces` | yes | Exactly one of `detail`, `harness`, `analytics`. |
+| `replaces` | only for `kind: "panel"` (the default) | Exactly one of `detail`, `harness`, `analytics`. |
+| `kind` | no | `"panel"` (default) or `"widget"`. A panel replaces one of the three slots above (see `replaces`); a widget is a smaller card on the Analytics dashboard (see below) and has no `replaces`. |
+| `size` | only for `kind: "widget"` | `"small" \| "medium" \| "large"` — the widget's footprint in the Analytics dashboard's grid. |
 | `tetherApiVersion` | yes | The plugin API version this targets — currently `1`. A mismatch leaves the plugin installed but skipped, with a warning on install and on every server startup. |
 | `icon` | no | Path to an icon in the repo. |
 
@@ -109,6 +111,21 @@ prefix (a breaking change would ship as `/api/v2/*`):
 
 Unknown `traceId` gives a 404 with `{ "ok": false, "error": "..." }`.
 Nothing here writes: a plugin cannot mutate the trace store.
+
+### Analytics widgets
+
+A plugin with `"kind": "widget"` in its manifest mounts as a small card in a grid on the
+Analytics view instead of replacing the whole view — several widgets from different plugins can
+be on the dashboard at once. Installed the same way as any plugin (`plugin add`); which widgets
+are currently on the dashboard is picked via the "Add widget" control on the Analytics view itself,
+and persisted server-side:
+
+- `GET /api/v1/dashboard/analytics` — `{ "slugs": string[] }`, the ordered list of widget slugs
+  currently on the dashboard (filtered to widgets that are still installed and version-compatible).
+- `PUT /api/v1/dashboard/analytics` — body `{ "slugs": string[] }`, replaces the list wholesale.
+
+A widget plugin reads data the same way a full-panel Analytics plugin does — `GET /api/v1/analytics`
+— there is no separate widget-specific data API.
 
 ## Building from source
 
