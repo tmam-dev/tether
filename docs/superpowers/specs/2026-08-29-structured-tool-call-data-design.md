@@ -92,7 +92,7 @@ The Flight Recorder inspector's Input/Output/Error blocks (plus the new Stack/Co
 
 ### 3.6 Versioning
 
-`trailai-mcp` ships this as a **major version bump** (breaking tool-schema change) with a `CHANGELOG.md` entry and a `README.md` migration note showing the old vs. new shapes for all three affected tools. `trailai-tether` (the server) needs no version coupling — it already renders whatever it finds in `raw` (§3.4's fallback), so an old `trailai-mcp` client and a new one can point at the same running server without issue; only the *producer* package version matters to a given caller's integration.
+`trailai-mcp` ships this as a **major version bump** (breaking tool-schema change) with a `README.md` migration note showing the old vs. new shapes for all three affected tools. (This repo has no `CHANGELOG.md` file/convention anywhere else, so — as actually implemented in Task 9 of the implementation plan — the migration note lives solely in `README.md`; this sentence originally also mentioned a `CHANGELOG.md` entry, which was never created and is not this repo's convention.) `trailai-tether` (the server) needs no version coupling — it already renders whatever it finds in `raw` (§3.4's fallback), so an old `trailai-mcp` client and a new one can point at the same running server without issue; only the *producer* package version matters to a given caller's integration.
 
 ### 3.7 Testing
 

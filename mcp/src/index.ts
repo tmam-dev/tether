@@ -11,7 +11,7 @@
  * Tools:
  *   trail_start_run      begin a run (returns run_id)
  *   trail_log_step       record a task or tool step
- *   trail_log_llm_call   record an LLM call with prompt/completion + usage
+ *   trail_log_llm_call   record an LLM call with messages/completion + usage
  *   trail_log_exception  record a failure (shows in Exceptions)
  *   trail_finish_run     close the run (emits the root agent span)
  *

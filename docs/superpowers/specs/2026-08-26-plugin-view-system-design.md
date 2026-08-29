@@ -125,3 +125,25 @@ git clone (CLI)  ─────────────▶  <data-dir>/plugins/
 - **How a plugin gets its data** — resolved as a new versioned public JSON API (§3.5) rather than exposing the existing HTML fragment routes or giving plugins any form of direct DB access; this is also the first JSON API this codebase has had, so it's designed as a stable public contract from the start rather than grown ad hoc.
 - **How a plugin is mounted in the host** — a same-origin iframe (§3.4), chosen over an inline same-origin script and a Web Component contract (steeper authoring bar, ties plugin authors to a Tether-specific JS API instead of "just build a web page"). Note this is a *containment* choice, not an *isolation* one: as §3.4 spells out, a same-origin frame with `allow-scripts` has the host page's full privileges. It buys a clean mount/unmount story and "a plugin is just a web page", not a security boundary.
 - **How installed plugins surface in navigation** — a per-slot picker next to the existing native view (§3.6), not a growing top-level nav list, so installing many plugins doesn't clutter navigation.
+
+## 7. Addendum (2026-08-30) — `io` shape widened under v1, not forked to v2
+
+The [2026-08-29 structured-tool-call-data spec](2026-08-29-structured-tool-call-data-design.md)
+widened `StepView.io`'s value type from always-`string` to
+`string | object | array | number | boolean | null`, which changes the
+shape of data `GET /api/v1/runs/:traceId` returns to plugins — a real
+change to the "genuinely public, stable contract" this spec (§3.5) said
+would never change silently under a stable URL.
+
+**Decision:** accepted as a v1-compatible widening, not forked to
+`/api/v2/*`. Reasoning: the plugin ecosystem is brand new (no known
+installed plugins depend on `io` always being a string), the change is
+additive at the type level (a v1 plugin that only ever handled strings
+will render `[object Object]` for the new cases rather than crash), and
+bumping `tetherApiVersion` would disable every installed plugin for a
+widening most will tolerate. Documented in `server/README.md`'s Plugins
+section so plugin authors know to handle non-string `io` values going
+forward. If a future breaking change to this route is needed for
+unrelated reasons, it should still fork to `/api/v2/*` per §3.5 — this
+addendum is a one-time exception for a genuinely additive widening, not a
+precedent for skipping versioning on breaking changes generally.

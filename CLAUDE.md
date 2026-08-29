@@ -56,10 +56,6 @@ they carry the "why" behind non-obvious decisions.
   No tool-list/tool-count field.
 - No sub-agent composition/handoff graph — `SubAgentEntry` is a flat
   `{name, description, tools}`, no inter-agent relationship data.
-- `mcp/src/index.ts` (where the 5 MCP tools — `trail_start_run`,
-  `trail_log_step`, `trail_log_llm_call`, `trail_log_exception`, +1 more —
-  are wired via `server.registerTool`) has no dedicated test file. Its
-  logic mostly delegates to `judge.ts`/`otlp.ts`, which are tested.
 
 ## Testing
 
