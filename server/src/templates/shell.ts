@@ -1,3 +1,5 @@
+import type { RegistryEntry } from "../registry.js";
+
 export type ShellView = "detail" | "harness" | "analytics";
 
 export interface ShellState {
@@ -9,6 +11,11 @@ export interface PluginOption {
 	slug: string;
 	name: string;
 	entry: string;
+}
+
+export interface SlotPickerOptions {
+	installed: PluginOption[];
+	registry: RegistryEntry[];
 }
 
 function escapeHtml(s: string): string {
@@ -245,20 +252,28 @@ const PLUGIN_PICKER_IDS: Record<ShellView, string> = {
 	analytics: "pluginPickerAnalytics",
 };
 
-function pluginPicker(slot: ShellView, state: ShellState, options: PluginOption[]): string {
-	if (options.length === 0) return "";
+function pluginPicker(slot: ShellView, state: ShellState, data: SlotPickerOptions): string {
+	if (data.installed.length === 0 && data.registry.length === 0) return "";
 	const visible = state.view === slot;
-	const opts = options
+	const opts = data.installed
 		.map((o) => `<option value="${escapeHtml(o.slug)}" data-entry="${escapeHtml(o.entry)}">${escapeHtml(o.name)}</option>`)
 		.join("");
-	return `<select id="${PLUGIN_PICKER_IDS[slot]}" class="plugin-picker" data-plugin-slot="${slot}"${visible ? "" : ' style="display:none"'}><option value="">Native</option>${opts}</select>`;
+	const registryOpts = data.registry.length
+		? `<optgroup label="Browse marketplace">${data.registry
+				.map(
+					(o) =>
+						`<option value="registry:${escapeHtml(o.slug)}" data-registry-slug="${escapeHtml(o.slug)}" title="${escapeHtml(o.description)}">${escapeHtml(o.name)} (install)</option>`
+				)
+				.join("")}</optgroup>`
+		: "";
+	return `<select id="${PLUGIN_PICKER_IDS[slot]}" class="plugin-picker" data-plugin-slot="${slot}"${visible ? "" : ' style="display:none"'}><option value="">Native</option>${opts}${registryOpts}</select>`;
 }
 
 // Invariant that must hold on both this server-rendered version and app.ts's client-updated
 // updateHarnessTab(): no `href` attribute on the Harness tab iff aria-disabled="true".
 // onRailOrTabClick's disabled check and any code doing `new URL(anchor.href)` on this tab depend
 // on that equivalence holding in both places.
-function topbar(state: ShellState, pluginsBySlot: Record<ShellView, PluginOption[]>): string {
+function topbar(state: ShellState, pluginsBySlot: Record<ShellView, SlotPickerOptions>): string {
 	const disabled = !state.traceId;
 	const hrefAttr = state.traceId ? ` href="/runs/${escapeHtml(state.traceId)}/harness"` : "";
 	const disabledAttr = disabled ? ' aria-disabled="true"' : "";
@@ -277,7 +292,11 @@ function topbar(state: ShellState, pluginsBySlot: Record<ShellView, PluginOption
 	</div>`;
 }
 
-const NO_PLUGINS: Record<ShellView, PluginOption[]> = { detail: [], harness: [], analytics: [] };
+const NO_PLUGINS: Record<ShellView, SlotPickerOptions> = {
+	detail: { installed: [], registry: [] },
+	harness: { installed: [], registry: [] },
+	analytics: { installed: [], registry: [] },
+};
 
 const PLUGIN_STYLES = `
 	.plugin-picker { font: inherit; font-size: 12px; color: var(--ink-2); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; }
@@ -292,10 +311,10 @@ export function renderShell(
 	title: string,
 	railHtml: string,
 	panelHtml: string,
-	pluginsBySlot: Record<ShellView, PluginOption[]> = NO_PLUGINS
+	pluginsBySlot: Record<ShellView, SlotPickerOptions> = NO_PLUGINS
 ): string {
 	const bootstrap = JSON.stringify({ view: state.view, traceId: state.traceId ?? null }).replace(/</g, "\\u003c");
-	const hasPlugins = Object.values(pluginsBySlot).some((p) => p.length > 0);
+	const hasPlugins = Object.values(pluginsBySlot).some((p) => p.installed.length > 0 || p.registry.length > 0);
 	const styles = STYLE + (hasPlugins ? PLUGIN_STYLES : "");
 	return `<!doctype html>
 <title>${escapeHtml(title)}</title>

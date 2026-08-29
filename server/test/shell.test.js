@@ -57,9 +57,9 @@ describe("renderShell", () => {
 
 describe("plugin picker", () => {
 	const plugins = {
-		detail: [{ slug: "waterfall-view", name: "Waterfall View", entry: "dist/index.html" }],
-		harness: [],
-		analytics: [],
+		detail: { installed: [{ slug: "waterfall-view", name: "Waterfall View", entry: "dist/index.html" }], registry: [] },
+		harness: { installed: [], registry: [] },
+		analytics: { installed: [], registry: [] },
 	};
 
 	test("renders a picker (by fixed id) for a slot with installed plugins, visible for the active view", () => {
@@ -74,7 +74,7 @@ describe("plugin picker", () => {
 		assert.match(html, /id="pluginPickerDetail"[^>]*style="display:\s*none"/);
 	});
 
-	test("omits a picker entirely for a slot with no installed plugins", () => {
+	test("omits a picker entirely for a slot with no installed plugins and no registry entries", () => {
 		const html = renderShell({ view: "harness", traceId: "a".repeat(32) }, "Tether", "", "", plugins);
 		assert.doesNotMatch(html, /id="pluginPickerHarness"/);
 	});
@@ -82,5 +82,29 @@ describe("plugin picker", () => {
 	test("defaults to no pickers when pluginsBySlot is omitted", () => {
 		const html = renderShell({ view: "detail", traceId: "a".repeat(32) }, "Tether", "", "");
 		assert.doesNotMatch(html, /plugin-picker/);
+	});
+
+	test("renders a picker for a slot with zero installed plugins but a registry entry", () => {
+		const withRegistry = {
+			detail: { installed: [], registry: [] },
+			harness: { installed: [], registry: [{ name: "Waterfall", slug: "waterfall-view", repo: "r", description: "A waterfall view.", kind: "panel", slot: "harness" }] },
+			analytics: { installed: [], registry: [] },
+		};
+		const html = renderShell({ view: "harness", traceId: "a".repeat(32) }, "Tether", "", "", withRegistry);
+		assert.match(html, /<select id="pluginPickerHarness"/);
+		assert.match(html, /<optgroup label="Browse marketplace">/);
+		assert.match(html, /<option value="registry:waterfall-view" data-registry-slug="waterfall-view" title="A waterfall view\.">Waterfall \(install\)<\/option>/);
+	});
+
+	test("escapes a registry entry's name and description", () => {
+		const withRegistry = {
+			detail: { installed: [], registry: [] },
+			harness: { installed: [], registry: [] },
+			analytics: { installed: [], registry: [{ name: "<script>alert(1)</script>", slug: "evil", repo: "r", description: "<img onerror=alert(1)>", kind: "panel", slot: "analytics" }] },
+		};
+		const html = renderShell({ view: "analytics" }, "Tether", "", "", withRegistry);
+		assert.equal(html.includes("<script>alert(1)</script>"), false);
+		assert.equal(html.includes("<img onerror=alert(1)>"), false);
+		assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 	});
 });
