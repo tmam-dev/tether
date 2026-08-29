@@ -80,6 +80,36 @@ describe("buildLlmCallSpan", () => {
 		const span = buildLlmCallSpan(RUN, "s5", "1000000000", "2000000000", { model: "gpt-4o-mini", status: "ok" });
 		assert.equal(span.attributes["gen_ai.usage.total_tokens"], undefined);
 	});
+
+	test("JSON-encodes a messages array into the prompt event", () => {
+		const messages = [{ role: "system", content: "be helpful" }, { role: "user", content: "fix the bug" }];
+		const span = buildLlmCallSpan(RUN, "s12", "1000000000", "2000000000", { model: "gpt-4o-mini", messages, status: "ok" });
+		assert.deepEqual(span.events, [{ name: "gen_ai.content.prompt", attributes: { "gen_ai.prompt": JSON.stringify(messages) } }]);
+	});
+
+	test("JSON-encodes the completion message object into the completion event", () => {
+		const completion = { role: "assistant", content: "done" };
+		const span = buildLlmCallSpan(RUN, "s13", "1000000000", "2000000000", { model: "gpt-4o-mini", completion, status: "ok" });
+		assert.deepEqual(span.events, [{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": JSON.stringify(completion) } }]);
+	});
+
+	test("preserves tool_calls on the completion message", () => {
+		const completion = { role: "assistant", content: "", tool_calls: [{ name: "read_file", args: { path: "a.py" } }] };
+		const span = buildLlmCallSpan(RUN, "s14", "1000000000", "2000000000", { model: "gpt-4o-mini", completion, status: "ok" });
+		assert.deepEqual(JSON.parse(span.events[0].attributes["gen_ai.completion"]), completion);
+	});
+
+	test("redacts a secret-shaped string inside a message's content", () => {
+		const messages = [{ role: "user", content: "my key is sk-abcdefghij1234567890" }];
+		const span = buildLlmCallSpan(RUN, "s15", "1000000000", "2000000000", { model: "gpt-4o-mini", messages, status: "ok" });
+		const decoded = JSON.parse(span.events[0].attributes["gen_ai.prompt"]);
+		assert.equal(decoded[0].content, "my key is [REDACTED]");
+	});
+
+	test("an empty messages array produces no prompt event", () => {
+		const span = buildLlmCallSpan(RUN, "s16", "1000000000", "2000000000", { model: "gpt-4o-mini", messages: [], status: "ok" });
+		assert.deepEqual(span.events, []);
+	});
 });
 
 describe("buildExceptionSpan", () => {
