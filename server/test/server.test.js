@@ -5,6 +5,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createServer as createHttpServer } from "node:http";
+import { execFileSync } from "node:child_process";
 import { openDatabase, countTraces } from "../dist/db.js";
 import { createTetherServer } from "../dist/server.js";
 
@@ -872,6 +873,82 @@ describe("plugin picker wiring", () => {
 			// separate "add a widget to the dashboard" picker -- that's a different affordance.
 			assert.match(html, /id="addWidgetPicker"/);
 			assert.match(html, /Sneaky Widget/);
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+});
+
+function makeRegistryFixtureRepo(slug, manifestOverrides = {}) {
+	const repoDir = mkdtempSync(join(tmpdir(), "tether-registry-repo-"));
+	execFileSync("git", ["init", "-q"], { cwd: repoDir });
+	execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir });
+	execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir });
+	const manifest = { name: "Registry Widget", slug, version: "1.0.0", author: "test", description: "d", entry: "dist/index.html", kind: "widget", size: "small", tetherApiVersion: 1, ...manifestOverrides };
+	writeFileSync(join(repoDir, "tether-plugin.json"), JSON.stringify(manifest));
+	mkdirSync(join(repoDir, "dist"));
+	writeFileSync(join(repoDir, "dist", "index.html"), "<!doctype html><p>widget</p>");
+	execFileSync("git", ["add", "-A"], { cwd: repoDir });
+	execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: repoDir });
+	return repoDir;
+}
+
+function seedRegistryCache(pluginsRoot, entries) {
+	mkdirSync(pluginsRoot, { recursive: true });
+	writeFileSync(join(pluginsRoot, "registry-cache.json"), JSON.stringify({ fetchedAt: Date.now(), data: { schemaVersion: 1, entries } }));
+}
+
+describe("POST /api/v1/plugins/install", () => {
+	test("installs a registry entry and returns its manifest", async () => {
+		const pluginsRoot = mkdtempSync(join(tmpdir(), "tether-plugins-install-"));
+		const repoDir = makeRegistryFixtureRepo("latency-p95");
+		seedRegistryCache(pluginsRoot, [{ name: "Latency P95", slug: "latency-p95", repo: repoDir, description: "d", kind: "widget" }]);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/plugins/install`, {
+				method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: "latency-p95" }),
+			});
+			const body = await res.json();
+			assert.equal(res.status, 200);
+			assert.equal(body.ok, true);
+			assert.equal(body.plugin.slug, "latency-p95");
+			assert.equal(body.compatible, true);
+		}, { pluginsRoot });
+		rmSync(repoDir, { recursive: true, force: true });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("404s for a slug not in the registry", async () => {
+		const pluginsRoot = mkdtempSync(join(tmpdir(), "tether-plugins-install-"));
+		seedRegistryCache(pluginsRoot, []);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/plugins/install`, {
+				method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: "nope" }),
+			});
+			assert.equal(res.status, 404);
+			assert.equal((await res.json()).ok, false);
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("400s for a body missing slug", async () => {
+		const pluginsRoot = mkdtempSync(join(tmpdir(), "tether-plugins-install-"));
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/plugins/install`, {
+				method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+			});
+			assert.equal(res.status, 400);
+		}, { pluginsRoot });
+		rmSync(pluginsRoot, { recursive: true, force: true });
+	});
+
+	test("502s when the registry's repo doesn't resolve", async () => {
+		const pluginsRoot = mkdtempSync(join(tmpdir(), "tether-plugins-install-"));
+		seedRegistryCache(pluginsRoot, [{ name: "Broken", slug: "broken", repo: join(tmpdir(), "does-not-exist-" + Date.now()), description: "d", kind: "widget" }]);
+		await withServer(async ({ port }) => {
+			const res = await fetch(`http://127.0.0.1:${port}/api/v1/plugins/install`, {
+				method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: "broken" }),
+			});
+			assert.equal(res.status, 502);
+			assert.equal((await res.json()).ok, false);
 		}, { pluginsRoot });
 		rmSync(pluginsRoot, { recursive: true, force: true });
 	});

@@ -20,8 +20,10 @@ import { renderHarnessBody } from "./templates/harness.js";
 import { renderAnalyticsBody } from "./templates/analytics.js";
 import type { WidgetOption } from "./templates/analytics.js";
 import { renderShell, renderNotFoundPanel } from "./templates/shell.js";
-import type { ShellState, ShellView, PluginOption } from "./templates/shell.js";
-import { resolvePluginAssetPath, contentTypeFor, readDevOverrides, listInstalledPlugins, readDashboardSlugs, writeDashboardSlugs } from "./plugins.js";
+import type { ShellState, ShellView, PluginOption, SlotPickerOptions } from "./templates/shell.js";
+import { resolvePluginAssetPath, contentTypeFor, readDevOverrides, listInstalledPlugins, readDashboardSlugs, writeDashboardSlugs, installPluginFromGitUrl } from "./plugins.js";
+import { currentRegistry, refreshRegistryIfStale } from "./registry.js";
+import type { RegistryEntry } from "./registry.js";
 
 const APP_JS = readFileSync(fileURLToPath(new URL("./static/app.js", import.meta.url)), "utf-8");
 
@@ -108,18 +110,21 @@ function buildRail(db: Database.Database, active: string | undefined): string {
 	return renderRailBody(listRuns(db, 50), active, Date.now());
 }
 
-/** Every compatible installed plugin under `pluginsRoot`, grouped by the shell slot it
- * replaces -- the shape `renderShell`'s picker expects. Incompatible plugins (a manifest's
- * `tetherApiVersion` mismatching `TETHER_API_VERSION`) are excluded here (spec §3.3: skipped, not
- * deleted); the mismatch is reported to the user once at install time and once per server startup
- * (index.ts's `warnAboutIncompatiblePlugins`), not on every page render. */
-function pluginsBySlot(pluginsRoot: string): Record<"detail" | "harness" | "analytics", PluginOption[]> {
-	const compatible = listInstalledPlugins(pluginsRoot).filter((p) => p.compatible && p.kind !== "widget");
+/** Every compatible installed plugin under `pluginsRoot`, grouped by the shell slot it replaces,
+ * alongside every not-yet-installed compatible registry entry for that slot -- the shape
+ * renderShell's picker expects. Also the one place a full-page render opportunistically kicks off
+ * a background registry refresh (fire-and-forget; never awaited here). */
+function pluginsBySlot(pluginsRoot: string): Record<"detail" | "harness" | "analytics", SlotPickerOptions> {
+	void refreshRegistryIfStale(pluginsRoot);
+	const installedPlugins = listInstalledPlugins(pluginsRoot);
+	const compatible = installedPlugins.filter((p) => p.compatible && p.kind !== "widget");
+	const installedSlugs = new Set(installedPlugins.map((p) => p.slug));
 	const toOption = (p: (typeof compatible)[number]): PluginOption => ({ slug: p.slug, name: p.name, entry: p.entry });
+	const registryPanels = currentRegistry(pluginsRoot).entries.filter((e) => e.kind === "panel" && !installedSlugs.has(e.slug));
 	return {
-		detail: compatible.filter((p) => p.replaces === "detail").map(toOption),
-		harness: compatible.filter((p) => p.replaces === "harness").map(toOption),
-		analytics: compatible.filter((p) => p.replaces === "analytics").map(toOption),
+		detail: { installed: compatible.filter((p) => p.replaces === "detail").map(toOption), registry: registryPanels.filter((e) => e.slot === "detail") },
+		harness: { installed: compatible.filter((p) => p.replaces === "harness").map(toOption), registry: registryPanels.filter((e) => e.slot === "harness") },
+		analytics: { installed: compatible.filter((p) => p.replaces === "analytics").map(toOption), registry: registryPanels.filter((e) => e.slot === "analytics") },
 	};
 }
 
@@ -142,6 +147,16 @@ function widgetOptions(pluginsRoot: string): WidgetOption[] {
 	return listInstalledPlugins(pluginsRoot)
 		.filter((p) => p.compatible && p.kind === "widget")
 		.map((p) => ({ slug: p.slug, name: p.name, entry: p.entry, size: p.size as WidgetOption["size"] }));
+}
+
+/** Every not-yet-installed kind:"widget" registry entry -- the marketplace analog of
+ * widgetOptions for the Add-widget picker's optgroup. Also opportunistically triggers a
+ * background registry refresh, same as pluginsBySlot -- this covers the Analytics routes, which
+ * don't call pluginsBySlot. */
+function registryWidgetOptions(pluginsRoot: string): RegistryEntry[] {
+	void refreshRegistryIfStale(pluginsRoot);
+	const installedSlugs = new Set(listInstalledPlugins(pluginsRoot).map((p) => p.slug));
+	return currentRegistry(pluginsRoot).entries.filter((e) => e.kind === "widget" && !installedSlugs.has(e.slug));
 }
 
 /** Response headers the dev-server proxy is allowed to pass back to the browser. An allowlist
@@ -287,7 +302,7 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 
 		if (req.method === "GET" && pathname === "/fragments/analytics") {
 			try {
-				const body = renderAnalyticsBody(getUsage(db), widgetOptions(pluginsRoot));
+				const body = renderAnalyticsBody(getUsage(db), widgetOptions(pluginsRoot), registryWidgetOptions(pluginsRoot));
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 				res.end(body);
 			} catch (err) {
@@ -443,6 +458,39 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 			return;
 		}
 
+		if (req.method === "POST" && pathname === "/api/v1/plugins/install") {
+			let parsed: unknown;
+			try {
+				const bodyText = await readBody(req);
+				parsed = JSON.parse(bodyText);
+			} catch (err) {
+				sendError(res, 400, `invalid JSON body: ${(err as Error).message}`);
+				return;
+			}
+			try {
+				const slug = (parsed as { slug?: unknown })?.slug;
+				if (typeof slug !== "string" || slug === "") {
+					sendError(res, 400, "body must be { slug: string }");
+					return;
+				}
+				const entry = currentRegistry(pluginsRoot).entries.find((e) => e.slug === slug);
+				if (!entry) {
+					sendError(res, 404, "unknown registry slug");
+					return;
+				}
+				const result = installPluginFromGitUrl(entry.repo, pluginsRoot);
+				if (!result.ok) {
+					sendError(res, 502, result.error);
+					return;
+				}
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ ok: true, plugin: result.manifest, compatible: !result.versionMismatch }));
+			} catch (err) {
+				sendError(res, 500, (err as Error).message);
+			}
+			return;
+		}
+
 		const pluginAssetMatch = pathname.match(/^\/plugins\/([^/]+)\/(.+)$/);
 		if (req.method === "GET" && pluginAssetMatch) {
 			try {
@@ -551,7 +599,7 @@ export function createTetherServer(db: Database.Database, options: { pluginsRoot
 					{ view: "analytics" },
 					"Tether — Analytics",
 					rail,
-					renderAnalyticsBody(getUsage(db), widgetOptions(pluginsRoot)),
+					renderAnalyticsBody(getUsage(db), widgetOptions(pluginsRoot), registryWidgetOptions(pluginsRoot)),
 					pluginsBySlot(pluginsRoot)
 				);
 				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
