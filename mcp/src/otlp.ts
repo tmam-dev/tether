@@ -93,7 +93,7 @@ export function buildPayload(cfg: TrailConfig, span: SpanInput) {
 				},
 				scopeSpans: [
 					{
-						scope: { name: "trail-mcp", version: "0.2.0" },
+						scope: { name: "trail-mcp", version: "0.3.0" },
 						spans: [
 							{
 								traceId: span.traceId,
@@ -126,7 +126,7 @@ export async function sendSpan(cfg: TrailConfig, span: SpanInput): Promise<void>
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
-			"User-Agent": "trail-mcp/0.2.0",
+			"User-Agent": "trail-mcp/0.3.0",
 			...(cfg.publicKey ? { "X-Public-Key": cfg.publicKey } : {}),
 			...(cfg.secretKey ? { "X-Secret-Key": cfg.secretKey } : {}),
 		},
