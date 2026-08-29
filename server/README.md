@@ -132,6 +132,25 @@ and persisted server-side:
 A widget plugin reads data the same way a full-panel Analytics plugin does — `GET /api/v1/analytics`
 — there is no separate widget-specific data API.
 
+### Registry
+
+Beyond "you already know the git URL," each of the pickers above (per-slot native/plugin picker,
+Add-widget picker) also lists a "Browse marketplace" group: not-yet-installed entries from
+`registry/plugins.json`, a small community-maintained index living in this repo. Picking one
+installs it — same `plugin add` logic, triggered from the UI instead of the CLI — no need to know
+its git URL up front.
+
+A snapshot of the index ships bundled with this npm package for offline/first-run use, and is
+opportunistically refreshed from a CDN URL in the background (at most once per 24h) whenever a
+picker is rendered — never blocking a request, and falling back to whatever was last bundled or
+cached if the fetch fails.
+
+A registry entry is a minimal pointer, not a full manifest — `name`, `slug`, `repo`, `description`,
+`kind` (`"panel" | "widget"`), and `slot` (panel entries only), mirroring `tether-plugin.json`'s
+own `kind`/`replaces` fields. Adding, updating, or removing a listing is a pull request against
+`registry/plugins.json` in this repo, reviewed the same way any other PR is — a listing being
+present means "listed," not "reviewed" or "certified."
+
 ## Building from source
 
 ```bash
