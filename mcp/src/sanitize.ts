@@ -23,7 +23,7 @@ function redact(s: string): string {
 function truncate(s: string, maxBytes: number): string {
 	const bytes = Buffer.byteLength(s, "utf8");
 	if (bytes <= maxBytes) return s;
-	const cut = Buffer.from(s, "utf8").subarray(0, maxBytes).toString("utf8");
+	const cut = Buffer.from(s, "utf8").subarray(0, maxBytes).toString("utf8").replace(/�+$/, "");
 	return `${cut}…[truncated, ${bytes}b]`;
 }
 
