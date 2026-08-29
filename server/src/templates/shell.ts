@@ -107,6 +107,7 @@ const STYLE = `
 	.widget-frame { width: 100%; height: 240px; border: 0; display: block; }
 	.widget-cell-small.widget-card, .widget-cell-medium.widget-card { grid-column: span 1; }
 	.widget-cell-large.widget-card { grid-column: span 2; }
+	#addWidgetPicker { font: inherit; font-size: 12px; color: var(--ink-2); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; }
 	.card-head h2 { font-size: 14px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
 	.card-head .count { font-family: var(--mono); font-size: 11px; color: var(--ink-3); font-weight: 400; }
 	.entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
