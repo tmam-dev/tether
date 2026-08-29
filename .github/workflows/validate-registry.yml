@@ -1,0 +1,24 @@
+# .github/workflows/validate-registry.yml
+name: Validate plugin registry
+
+on:
+  pull_request:
+    paths:
+      - "registry/plugins.json"
+      - "server/src/registry.ts"
+      - "server/scripts/validate-registry-ci.mjs"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+        working-directory: server
+      - run: npm run build
+        working-directory: server
+      - run: node scripts/validate-registry-ci.mjs
+        working-directory: server
