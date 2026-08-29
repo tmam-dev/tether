@@ -617,3 +617,49 @@ describe("initWidgetDashboard", () => {
 		assert.deepEqual(putCalls[putCalls.length - 1], { slugs: [] });
 	});
 });
+
+describe("renderIoPair / JSON tree rendering", () => {
+	test("a string io value renders exactly as plain escaped text (unchanged from before)", () => {
+		const { sandbox } = loadApp();
+		const html = sandbox.renderIoPair(["Input", "pytest -x"]);
+		assert.equal(html, '<div class="io-kind">Input</div><div class="io-block">pytest -x</div>');
+	});
+
+	test("an object io value renders as a collapsible JSON tree with escaped keys/values", () => {
+		const { sandbox } = loadApp();
+		const html = sandbox.renderIoPair(["Input", { file: "auth.py", ok: true }]);
+		assert.match(html, /<div class="io-kind">Input<\/div>/);
+		assert.match(html, /class="io-json"/);
+		assert.match(html, /class="jv-key">file</);
+		assert.match(html, /class="jv-str">"auth\.py"/);
+		assert.match(html, /class="jv-scalar">true/);
+	});
+
+	test("a messages array io value renders as a role-labeled list, not generic JSON", () => {
+		const { sandbox } = loadApp();
+		const html = sandbox.renderIoPair(["Input", [{ role: "system", content: "be helpful" }, { role: "user", content: "hi" }]]);
+		assert.match(html, /class="msg-role">system/);
+		assert.match(html, /class="msg-role">user/);
+		assert.doesNotMatch(html, /jv-node/);
+	});
+
+	test("HTML embedded in a structured string value is escaped, not injected", () => {
+		const { sandbox } = loadApp();
+		const html = sandbox.renderIoPair(["Output", { note: "<script>alert(1)</script>" }]);
+		assert.doesNotMatch(html, /<script>alert/);
+		assert.match(html, /&lt;script&gt;/);
+	});
+
+	test("an empty object/array renders its punctuation, not an empty collapsible node", () => {
+		const { sandbox } = loadApp();
+		assert.equal(sandbox.renderJsonNode({}), '<span class="jv-punct">{}</span>');
+		assert.equal(sandbox.renderJsonNode([]), '<span class="jv-punct">[]</span>');
+	});
+
+	test("isMessageList rejects a plain object and a non-role-shaped array", () => {
+		const { sandbox } = loadApp();
+		assert.equal(sandbox.isMessageList({ file: "a.py" }), false);
+		assert.equal(sandbox.isMessageList([1, 2, 3]), false);
+		assert.equal(sandbox.isMessageList([]), false);
+	});
+});

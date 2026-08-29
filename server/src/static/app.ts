@@ -37,6 +37,44 @@ const TYPE_COLOR: Record<string, [string, string]> = {
 	tool: ["#C77DBB", "rgba(199,125,187,0.14)"], llm: ["#5FA8D3", "rgba(95,168,211,0.14)"],
 	search: ["#6FA96B", "rgba(111,169,107,0.14)"],
 };
+
+function escapeHtml(s: string): string { return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" } as Record<string, string>)[c]); }
+
+function isMessageList(v: unknown): v is { role: string; content: string }[] {
+	return Array.isArray(v) && v.length > 0 && v.every((m) => m !== null && typeof m === "object" && typeof (m as Record<string, unknown>).role === "string" && typeof (m as Record<string, unknown>).content === "string");
+}
+
+function renderMessages(msgs: { role: string; content: string }[]): string {
+	return msgs.map((m) => '<details class="msg-row" open><summary class="msg-role">' + escapeHtml(m.role) + '</summary><div class="io-block">' + escapeHtml(m.content) + "</div></details>").join("");
+}
+
+function renderJsonNode(v: unknown): string {
+	if (v === null) return '<span class="jv-null">null</span>';
+	if (typeof v === "string") return '<span class="jv-str">"' + escapeHtml(v) + '"</span>';
+	if (typeof v === "number" || typeof v === "boolean") return '<span class="jv-scalar">' + String(v) + "</span>";
+	if (Array.isArray(v)) {
+		if (!v.length) return '<span class="jv-punct">[]</span>';
+		const rows = v.map((item, idx) => '<div class="jv-row"><span class="jv-key">' + idx + '</span>' + renderJsonNode(item) + "</div>").join("");
+		return '<details class="jv-node" open><summary>Array(' + v.length + ")</summary><div class=\"jv-children\">" + rows + "</div></details>";
+	}
+	if (typeof v === "object") {
+		const entries = Object.entries(v as Record<string, unknown>);
+		if (!entries.length) return '<span class="jv-punct">{}</span>';
+		const rows = entries.map(([k, val]) => '<div class="jv-row"><span class="jv-key">' + escapeHtml(k) + '</span>' + renderJsonNode(val) + "</div>").join("");
+		return '<details class="jv-node" open><summary>Object</summary><div class="jv-children">' + rows + "</div></details>";
+	}
+	return '<span class="jv-punct">' + escapeHtml(String(v)) + "</span>";
+}
+
+function renderIoPair(p: [string, string | unknown]): string {
+	const [label, value] = p;
+	const body =
+		typeof value === "string" ? '<div class="io-block">' + escapeHtml(value) + "</div>"
+		: isMessageList(value) ? renderMessages(value)
+		: '<div class="io-json">' + renderJsonNode(value) + "</div>";
+	return '<div class="io-kind">' + escapeHtml(label) + "</div>" + body;
+}
+
 // Object.assign(Object.create(null), ...) rather than a plain object literal: `runData.verdict`
 // is attacker-controlled (arrives via the unauthenticated POST /traces endpoint, serialized
 // straight through into the run-data JSON island). runs.ts's asVerdict() is the primary guard
@@ -67,7 +105,6 @@ function mountDetailPanel(runData: RunData): () => void {
 	function fmtT(s: number): string { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
 	function fmtCost(c: number | null): string { return c == null ? "" : "$" + c.toFixed(c < 1 ? 3 : 2); }
 	function fmtTok(t: number | null): string { return t == null ? "" : (t >= 1000 ? (t / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(t)); }
-	function escapeHtml(s: string): string { return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" } as Record<string, string>)[c]); }
 
 	function ring(pct: number, color: string): string {
 		const r = 18, C = 2 * Math.PI * r, on = (pct / 100) * C;
@@ -227,7 +264,7 @@ function mountDetailPanel(runData: RunData): () => void {
 		const insp = $("insp");
 		let inner = '<div class="pin-note"><span>&#9670; pinned to step ' + (i + 1) + '</span><button id="unpin">back to verdict</button></div>';
 		if (s.sig) inner += s.sig.map((sg) => '<div class="io-sig"><span style="color:var(--stuck);display:grid;place-items:center">' + svg(SVG_LOOP, 1.9) + '</span><div><span class="st" style="color:var(--stuck)">Retry loop &times;' + sg.count + '</span><div style="color:var(--ink-2);margin-top:2px">' + escapeHtml(sg.detail) + "</div></div></div>").join("");
-		if (s.io && s.io.length) inner += s.io.map((p) => '<div class="io-kind">' + escapeHtml(p[0]) + '</div><div class="io-block">' + escapeHtml(typeof p[1] === "string" ? p[1] : JSON.stringify(p[1])) + "</div>").join("");
+		if (s.io && s.io.length) inner += s.io.map((p) => renderIoPair(p)).join("");
 		else inner += '<div class="insp-empty">No input/output recorded for this step.</div>';
 		insp.innerHTML = inner;
 		const un = document.getElementById("unpin");
