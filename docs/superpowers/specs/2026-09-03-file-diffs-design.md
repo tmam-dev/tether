@@ -56,6 +56,8 @@ A diff-specific path, used only for the `diffs` field:
 1. Split the diff into its file header (the `---`/`+++` lines, where present) and its hunks, on `@@` boundaries.
 2. **Redact the header and each hunk** with the existing `redact` — a diff of a `.env` or a credentials file must not bypass secret scrubbing. This is not optional and must be covered by a test.
 3. **Always keep the file header**, outside the budget. It is a bounded handful of bytes, and a diff without it is ambiguous about what it applies to.
+
+   This holds only when the input actually parses as a unified diff. A `diff` string containing no `@@` hunk at all is not a header — it is unstructured text of unknown size, so it is byte-truncated to the entry budget like any other string, with `hunksTotal: 0`. Treating it as a header would let malformed input bypass the budget entirely.
 4. Fill the byte budget with **whole hunks only**, never a partial one, admitting them in file order.
 5. Record what was dropped as structured fields on the entry: `hunksShown`, `hunksTotal`, `bytesOmitted`, and `partialHunk` (a boolean, see below).
 
@@ -82,7 +84,9 @@ Decoding follows the file's stated contract: degrade, never throw. A `diffs` val
 
 ### 3.5 UI (`server/src/static/app.ts`)
 
-A `renderDiff` branch in `renderIoPair`'s existing shape dispatch (`app.ts:69`), rendered in the step's I/O panel (`renderStepIO`, `app.ts:262`):
+A dedicated `renderDiffs` function called from `renderStepIO` (`app.ts:262`), rendered as its own block in the step's I/O panel.
+
+Note this is *not* a branch inside `renderIoPair` (`app.ts:69`): that function renders `io` pairs, and §3.4 deliberately keeps `diffs` out of `io`. The shape-dispatch pattern is the precedent being followed, not the function being extended.
 
 - Per-file header showing `path`.
 - `+`/`-` line coloring, using the existing theme tokens.
