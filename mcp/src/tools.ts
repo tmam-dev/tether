@@ -218,7 +218,7 @@ export function buildTrailServer(cfg: TrailConfig, judgeCfg: JudgeConfig | undef
 			title: "Log a step",
 			description:
 				"Record one unit of work in the run — a task (planning, editing, running tests) or a tool call " +
-				"(shell command, file read, search). Appears in the trace tree and Agent analytics.",
+				"(shell command, file read, search). Appears in the trace tree and Agent analytics; report file diffs for any changes made.",
 			inputSchema: {
 				run_id: z.string(),
 				name: z.string().describe("Step name, e.g. 'run pytest' or 'edit auth.py'"),
