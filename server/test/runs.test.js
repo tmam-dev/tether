@@ -476,6 +476,42 @@ describe("getRun", () => {
 			rmSync(join(dbPath, ".."), { recursive: true, force: true });
 		}
 	});
+
+	test("drops a diff entry with a non-finite or negative numeric field instead of rendering NaNB", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "td5", spanId: "rd5", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1030000000000" }));
+			// Hand-written JSON rather than JSON.stringify(diffs): NaN/Infinity aren't valid JSON
+			// tokens, so a real forged payload can't spell them directly -- but 1e400 IS a
+			// syntactically valid JSON number that overflows to Infinity once JS parses it as a
+			// double. That's the realistic non-finite shape asDiffView must reject, alongside a
+			// plain negative bytesOmitted.
+			const rawDiffs = "["
+				+ '{"path":"overflow.py","diff":"@@ -1 +1 @@\\n-a\\n+b\\n","hunksShown":1e400,"hunksTotal":2,"bytesOmitted":0,"partialHunk":false},'
+				+ '{"path":"negative.py","diff":"@@ -1 +1 @@\\n-a\\n+b\\n","hunksShown":1,"hunksTotal":2,"bytesOmitted":-5,"partialHunk":false},'
+				+ '{"path":"valid.py","diff":"@@ -1 +1 @@\\n-c\\n+d\\n","hunksShown":1,"hunksTotal":1,"bytesOmitted":0,"partialHunk":false}'
+				+ "]";
+			const attrs = { "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "edit forged" };
+			const events = [{ name: "gen_ai.content.diffs", attributes: otlpAttrs({ "gen_ai.diffs": rawDiffs }) }];
+			const raw = {
+				traceId: "td5", spanId: "s1", parentSpanId: "rd5", name: "edit forged",
+				startTimeUnixNano: "1005000000000", endTimeUnixNano: "1010000000000",
+				attributes: otlpAttrs(attrs), events, status: { code: 1 },
+			};
+			insertSpan(db, {
+				traceId: "td5", spanId: "s1", parentSpanId: "rd5", name: "edit forged",
+				startTimeUnixNano: "1005000000000", endTimeUnixNano: "1010000000000",
+				raw: JSON.stringify(raw),
+			});
+			const run = getRun(db, "td5");
+			assert.equal(run.steps[0].diffs.length, 1, "non-finite/negative entries must be dropped like any other malformed entry");
+			assert.equal(run.steps[0].diffs[0].path, "valid.py");
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
 });
 
 describe("malformed nanosecond timestamps never throw (finding 5)", () => {

@@ -21,10 +21,23 @@ function redact(s: string): string {
 }
 
 function truncate(s: string, maxBytes: number): string {
+	return truncateBytes(s, maxBytes).text;
+}
+
+/**
+ * Like truncate(), but also reports how many bytes of the original content were actually dropped.
+ * The `…[truncated, Nb]` suffix truncate() appends is itself ~18-23 bytes, so the returned text's
+ * total byte length is not a safe stand-in for "bytes omitted" -- when the overshoot is smaller
+ * than the suffix, `size - text.length` goes negative and callers that clamp it to 0 would wrongly
+ * report nothing was dropped. `cutBytes` here is the gap between the original and the kept content
+ * alone, before the suffix is added, so it's always > 0 whenever a cut actually happened.
+ */
+function truncateBytes(s: string, maxBytes: number): { text: string; cutBytes: number } {
 	const bytes = Buffer.byteLength(s, "utf8");
-	if (bytes <= maxBytes) return s;
+	if (bytes <= maxBytes) return { text: s, cutBytes: 0 };
 	const cut = Buffer.from(s, "utf8").subarray(0, maxBytes).toString("utf8").replace(/�+$/, "");
-	return `${cut}…[truncated, ${bytes}b]`;
+	const keptBytes = Buffer.byteLength(cut, "utf8");
+	return { text: `${cut}…[truncated, ${bytes}b]`, cutBytes: bytes - keptBytes };
 }
 
 export function sanitize(value: unknown, maxBytes = 16384): unknown {
@@ -83,52 +96,76 @@ export function sanitizeDiffs(entries: DiffInput[]): DiffEntry[] {
 	const out: DiffEntry[] = [];
 
 	for (const entry of entries) {
+		if (entry === null || typeof entry !== "object") {
+			continue; // Skip non-object entries (e.g. null/undefined slipping past the schema)
+		}
 		if (typeof entry.path !== "string" || typeof entry.diff !== "string") {
 			continue; // Skip entries with non-string path or diff
 		}
 		const path = redact(entry.path);
+		const pathBytes = Buffer.byteLength(path, "utf8");
 		const { header, hunks, body } = splitHunks(entry.diff);
 		const budget = Math.min(DIFF_ENTRY_BUDGET, remaining);
 
 		if (body !== null) {
-			// No hunks: unstructured text. Byte-truncate like any other string.
+			// No hunks: unstructured text. Byte-truncate like any other string. The path is part
+			// of what this entry costs the step budget, so it comes out of the same allowance the
+			// body content competes for.
 			const safe = redact(body);
 			const size = Buffer.byteLength(safe, "utf8");
-			const kept = size <= budget ? safe : truncate(safe, budget);
-			const used = Buffer.byteLength(kept, "utf8");
+			const bodyBudget = Math.max(0, budget - pathBytes);
+			let kept: string;
+			let bytesOmitted: number;
+			if (size <= bodyBudget) {
+				kept = safe;
+				bytesOmitted = 0;
+			} else {
+				const t = truncateBytes(safe, bodyBudget);
+				kept = t.text;
+				bytesOmitted = t.cutBytes;
+			}
+			const used = pathBytes + Buffer.byteLength(kept, "utf8");
 			remaining = Math.max(0, remaining - used);
-			out.push({ path, diff: kept, hunksShown: 0, hunksTotal: 0, bytesOmitted: Math.max(0, size - used), partialHunk: false });
+			out.push({ path, diff: kept, hunksShown: 0, hunksTotal: 0, bytesOmitted, partialHunk: false });
 			continue;
 		}
 
+		// The header (and the path) are always retained -- a diff without its header is
+		// ambiguous, and the path is how the UI identifies the file at all -- but their bytes
+		// still count against both this entry's and the step's remaining budget, so a step with
+		// many large pre-hunk headers can't emit unbounded bytes. If they alone exceed what's
+		// left, hunks simply get none of the budget (hunkBudget floors at 0) rather than the
+		// overhead being absorbed for free.
 		const safeHeader = redact(header);
+		const overhead = Buffer.byteLength(safeHeader, "utf8") + pathBytes;
+		const hunkBudget = Math.max(0, budget - overhead);
 		const kept: string[] = [];
-		let used = 0, shown = 0, omitted = 0, partial = false;
+		let hunkUsed = 0, shown = 0, omitted = 0, partial = false;
 
 		for (const hunk of hunks) {
 			const safe = redact(hunk);
 			const size = Buffer.byteLength(safe, "utf8");
-			if (used + size <= budget) {
+			if (hunkUsed + size <= hunkBudget) {
 				kept.push(safe);
-				used += size;
+				hunkUsed += size;
 				shown += 1;
 				continue;
 			}
-			if (shown === 0 && budget > 0) {
+			if (shown === 0 && hunkBudget > 0) {
 				// One hunk alone exceeds the entry budget -- the only case where a partial hunk
 				// beats showing nothing. Flagged so the UI can say the hunk itself is cut.
-				const cut = truncate(safe, budget);
-				const cutSize = Buffer.byteLength(cut, "utf8");
-				kept.push(cut);
-				used += cutSize;
+				const t = truncateBytes(safe, hunkBudget);
+				kept.push(t.text);
+				hunkUsed += Buffer.byteLength(t.text, "utf8");
 				shown += 1;
 				partial = true;
-				omitted += Math.max(0, size - cutSize);
+				omitted += t.cutBytes;
 				continue;
 			}
 			omitted += size;
 		}
 
+		const used = overhead + hunkUsed;
 		remaining = Math.max(0, remaining - used);
 		out.push({
 			path,

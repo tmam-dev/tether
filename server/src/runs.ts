@@ -189,11 +189,16 @@ export function decodeIoValue(raw: string): string | unknown {
 }
 
 /** Returns v as a DiffView if it has the exact expected shape, otherwise null -- payloads arrive from unauthenticated ingest, so anything unexpected is ignored rather than trusted or thrown on. */
+/** True for a finite, non-negative number -- rejects NaN/Infinity/negative values a forged ingest payload could supply for a byte/hunk count. */
+function isNonNegativeFiniteNumber(v: unknown): v is number {
+	return typeof v === "number" && Number.isFinite(v) && v >= 0;
+}
+
 function asDiffView(v: unknown): DiffView | null {
 	if (v === null || typeof v !== "object") return null;
 	const d = v as Record<string, unknown>;
 	if (typeof d.path !== "string" || typeof d.diff !== "string") return null;
-	if (typeof d.hunksShown !== "number" || typeof d.hunksTotal !== "number" || typeof d.bytesOmitted !== "number") return null;
+	if (!isNonNegativeFiniteNumber(d.hunksShown) || !isNonNegativeFiniteNumber(d.hunksTotal) || !isNonNegativeFiniteNumber(d.bytesOmitted)) return null;
 	if (typeof d.partialHunk !== "boolean") return null;
 	return { path: d.path, diff: d.diff, hunksShown: d.hunksShown, hunksTotal: d.hunksTotal, bytesOmitted: d.bytesOmitted, partialHunk: d.partialHunk };
 }

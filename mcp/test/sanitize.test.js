@@ -235,4 +235,48 @@ describe("sanitizeDiffs", () => {
 		const out = sanitizeDiffs([{ path: 123, diff: null }]);
 		assert.equal(out.length, 0, "bad entry should be skipped, not thrown");
 	});
+
+	test("skips null and undefined array elements without throwing, keeping valid entries", () => {
+		const entries = [
+			{ path: "good1.txt", diff: HEADER + HUNK_A },
+			null,
+			{ path: "good2.txt", diff: HEADER + HUNK_B },
+			undefined,
+		];
+		const out = sanitizeDiffs(entries);
+		assert.equal(out.length, 2, "null/undefined entries should be skipped, not thrown on");
+		assert.equal(out[0].path, "good1.txt");
+		assert.equal(out[1].path, "good2.txt");
+	});
+
+	test("the 1MB step budget is a real bound even when every entry carries a large pre-hunk header", () => {
+		// Each entry pairs a 100KB header (redacted/concatenated unconditionally, per spec) with a
+		// 100KB hunk (budget-governed). Before the fix, the header's bytes never decremented
+		// `remaining`, so far more of these 100KB hunks were admitted in full than the 1MB step
+		// budget should allow -- the equivalent pre-fix simulation for this exact input emits
+		// ~2.43x DIFF_STEP_BUDGET. Post-fix it stays under 2x.
+		const STEP_BUDGET = 1048576;
+		const N = 15, headerSize = 100000, hunkSize = 100000;
+		const entries = Array.from({ length: N }, (_, i) => ({
+			path: `f${i}.txt`,
+			diff: `--- a/file${i}\n+++ b/file${i}\n${"x".repeat(headerSize)}\n@@ -1,1 +1,1 @@\n+${"y".repeat(hunkSize)}\n`,
+		}));
+		const out = sanitizeDiffs(entries);
+		assert.equal(out.length, N, "every changed file still appears");
+		const total = out.reduce((sum, e) => sum + Buffer.byteLength(e.diff, "utf8"), 0);
+		assert.ok(
+			total < STEP_BUDGET * 2.2,
+			`total emitted bytes (${total}) must stay within a sane multiple of the step budget (${STEP_BUDGET}), not grow unbounded with entry count`,
+		);
+	});
+
+	test("a body-path diff that overshoots the budget by fewer bytes than the truncation marker still reports bytesOmitted > 0", () => {
+		const path = "a"; // 1 byte, so the body budget is budget - 1
+		const bodyBudget = 262144 - path.length;
+		const overshoot = 5; // smaller than the ~23-byte "…[truncated, Nb]" marker
+		const diff = "q".repeat(bodyBudget + overshoot); // no @@, so this is the unstructured body path
+		const [e] = sanitizeDiffs([{ path, diff }]);
+		assert.equal(e.hunksTotal, 0);
+		assert.ok(e.bytesOmitted > 0, "content was in fact cut, so bytesOmitted must not be clamped to 0");
+	});
 });

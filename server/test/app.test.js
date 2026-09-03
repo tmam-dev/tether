@@ -929,4 +929,11 @@ describe("renderDiffs", () => {
 		const html = render([{ path: "x.html", diff: "@@ -1 +1 @@\n+<script>alert(1)</script>\n", hunksShown: 1, hunksTotal: 1, bytesOmitted: 0, partialHunk: false }]);
 		assert.ok(!html.includes("<script>alert(1)</script>"), "diff text is attacker-controlled and must be escaped");
 	});
+
+	test("a budget-truncated non-unified diff gets its own wording instead of '0 of 0 hunks shown'", () => {
+		const html = render([{ path: "blob.txt", diff: "not a diff at all, just truncated text", hunksShown: 0, hunksTotal: 0, bytesOmitted: 4096, partialHunk: false }]);
+		assert.ok(!html.includes("0 of 0 hunks"), "hunk-counting language is nonsensical when there were never any hunks");
+		assert.ok(/truncated/i.test(html), "the banner must still say content was cut");
+		assert.ok(html.includes("4KB") || html.includes("4096"), "the omitted size must still be stated");
+	});
 });

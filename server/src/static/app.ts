@@ -98,6 +98,11 @@ function renderDiffs(diffs: { path: string; diff: string; hunksShown: number; hu
 		let banner = "";
 		if (d.hunksTotal > 0 && d.hunksShown === 0) {
 			banner = "Changed, but not shown — " + d.hunksTotal + " hunks omitted (" + fmtBytes(d.bytesOmitted) + ") to stay within this step's diff budget.";
+		} else if (d.hunksTotal === 0 && d.bytesOmitted > 0) {
+			// This diff never had hunks to begin with (unstructured/non-unified text) -- talking
+			// about "0 of 0 hunks shown" here would be accurate but nonsensical, so state the
+			// truncation on its own terms instead.
+			banner = "Truncated — " + fmtBytes(d.bytesOmitted) + " omitted to stay within this step's diff budget.";
 		} else if (incomplete) {
 			// hunksShown/hunksTotal/bytesOmitted can all agree nothing was dropped while partialHunk is
 			// still true (the last hunk itself was cut mid-way) -- state that on its own rather than
