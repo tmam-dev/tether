@@ -9,7 +9,7 @@ const SECRET_PATTERNS: RegExp[] = [
 	/\bghp_[A-Za-z0-9]{20,}\b/g, // GitHub personal access tokens
 	/\bAKIA[A-Z0-9]{12,}\b/g, // AWS access key ids
 	/\bBearer\s+[A-Za-z0-9._-]{10,}\b/g, // Authorization: Bearer <token>
-	/["']?[A-Za-z0-9_]*(?:secret|password|token|api[_-]?key)[A-Za-z0-9_]*["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, // KEY=value / "key": "value" near a secret-ish name
+	/["']?[A-Za-z0-9_]{0,64}(?:secret|password|token|api[_-]?key)[A-Za-z0-9_]{0,64}["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, // KEY=value / "key": "value" near a secret-ish name
 ];
 
 function redact(s: string): string {

@@ -34,6 +34,16 @@ describe("sanitize — redaction", () => {
 	test("does not redact an ordinary short numeric id", () => {
 		assert.equal(sanitize("build id: 4821"), "build id: 4821");
 	});
+
+	test("redaction of a large input completes quickly (no O(n²) backtracking)", () => {
+		// Regression test: the SECRET_PATTERNS regex must not cause catastrophic backtracking
+		// on large innocent inputs. This guards against O(n²) behavior that would hang
+		// processing of large diffs or payloads.
+		const start = Date.now();
+		sanitize("x".repeat(300000)); // 300KB of innocent characters
+		const elapsed = Date.now() - start;
+		assert.ok(elapsed < 2000, `redaction took ${elapsed}ms, expected < 2000ms`);
+	});
 });
 
 describe("sanitize — truncation", () => {
