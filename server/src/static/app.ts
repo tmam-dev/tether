@@ -94,13 +94,19 @@ function renderDiffs(diffs: { path: string; diff: string; hunksShown: number; hu
 			return '<div class="' + cls + '">' + escapeHtml(ln) + "</div>";
 		}).join("");
 
-		const incomplete = d.hunksShown < d.hunksTotal || d.bytesOmitted > 0;
+		const incomplete = d.hunksShown < d.hunksTotal || d.bytesOmitted > 0 || d.partialHunk;
 		let banner = "";
 		if (d.hunksTotal > 0 && d.hunksShown === 0) {
 			banner = "Changed, but not shown — " + d.hunksTotal + " hunks omitted (" + fmtBytes(d.bytesOmitted) + ") to stay within this step's diff budget.";
 		} else if (incomplete) {
-			banner = d.hunksShown + " of " + d.hunksTotal + " hunks shown, " + fmtBytes(d.bytesOmitted) + " omitted."
-				+ (d.partialHunk ? " The last hunk shown is itself cut mid-way." : "");
+			// hunksShown/hunksTotal/bytesOmitted can all agree nothing was dropped while partialHunk is
+			// still true (the last hunk itself was cut mid-way) -- state that on its own rather than
+			// tacking "0 omitted" onto a sentence that would otherwise read as self-contradictory.
+			const countsIncomplete = d.hunksShown < d.hunksTotal || d.bytesOmitted > 0;
+			banner = countsIncomplete
+				? d.hunksShown + " of " + d.hunksTotal + " hunks shown, " + fmtBytes(d.bytesOmitted) + " omitted."
+					+ (d.partialHunk ? " The last hunk shown is itself cut mid-way." : "")
+				: "The last hunk shown is cut mid-way — this diff is not complete.";
 		}
 
 		return '<div class="io-kind">' + escapeHtml(d.path) + "</div>"

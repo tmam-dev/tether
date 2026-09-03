@@ -907,6 +907,12 @@ describe("renderDiffs", () => {
 		assert.ok(/cut|truncated/i.test(html), "a mid-hunk cut must be stated, not implied");
 	});
 
+	test("still shows a banner when partialHunk is true but hunksShown/hunksTotal/bytesOmitted all claim nothing was dropped", () => {
+		const html = render([{ path: "sneaky.py", diff: "@@ -1 +1 @@\n+z\n", hunksShown: 1, hunksTotal: 1, bytesOmitted: 0, partialHunk: true }]);
+		assert.ok(html.includes('class="diff-banner"'), "a mid-hunk cut must render a banner even when the counts alone look complete");
+		assert.ok(/cut|truncated/i.test(html), "the banner must communicate the cut, not just imply it via omitted counts");
+	});
+
 	test("renders a header-only entry squeezed out by the step budget as changed-but-not-shown", () => {
 		const html = render([{ path: "skipped.py", diff: "--- a/skipped.py\n+++ b/skipped.py\n", hunksShown: 0, hunksTotal: 4, bytesOmitted: 30000, partialHunk: false }]);
 		assert.ok(html.includes("skipped.py"), "a changed file must stay visible");
