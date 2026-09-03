@@ -63,16 +63,27 @@ describe("sanitize — redaction", () => {
 		assert.ok(sanitize(keyNearBound).includes("[REDACTED]"));
 	});
 
-	test("key names past the {0,64} bound still redact when the keyword aligns", () => {
-		// The {0,64} bound limits the prefix/suffix, but the regex still matches by starting
-		// the match from a position where the keyword is within range. This is the accepted
-		// trade-off: we bound the quantifiers to prevent O(n²) backtracking on malformed input,
-		// and accept that some unusual formatting may fail to redact if the keyword prefix
-		// exceeds 64 characters with no room for suffix matching.
+	test("key names with long prefix still redact because the regex is unanchored", () => {
+		// The {0,64} bound does not prevent redaction of long key-name prefixes, because
+		// the regex is unanchored. The engine tries every start position and finds a match
+		// where the (up to) final 64 characters of the prefix align within the bound.
+		// So prefix length cannot defeat the pattern; only suffix length between the
+		// keyword and its delimiter can.
 		const keyWithLongPrefix = "a".repeat(100) + "_password=hunter2hunter2";
 		const redacted = sanitize(keyWithLongPrefix);
-		assert.ok(!redacted.includes("password"), "still redacts when keyword aligns within bound");
+		assert.ok(!redacted.includes("password"), "long prefix does not defeat redaction");
 		assert.ok(redacted.includes("[REDACTED]"));
+	});
+
+	test("key names with long suffix between keyword and value DO miss redaction (accepted cost)", () => {
+		// The real, accepted cost of the {0,64} bound: a keyword followed by more than 64
+		// characters before the delimiter. This is a contrived shape (why would there be
+		// 100 character between "password" and "="), but it is the trade-off we accept to
+		// prevent O(n²) backtracking on every large innocuous input.
+		const keyWithLongSuffix = "password" + "b".repeat(100) + "=hunter2hunter2";
+		const redacted = sanitize(keyWithLongSuffix);
+		assert.ok(redacted.includes("password"), "long suffix between keyword and delimiter is NOT redacted");
+		assert.ok(!redacted.includes("[REDACTED]"));
 	});
 });
 
