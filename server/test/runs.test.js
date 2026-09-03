@@ -460,11 +460,13 @@ describe("getRun", () => {
 			const run = getRun(db, "td4");
 			assert.equal(run.steps[0].diffs.length, 2, "invalid entry is dropped, valid ones survive");
 			assert.equal(run.steps[0].diffs[0].path, "valid1.py");
+			assert.equal(run.steps[0].diffs[0].diff, "@@ -1 +1 @@\n-a\n+b\n");
 			assert.equal(run.steps[0].diffs[0].hunksShown, 1);
 			assert.equal(run.steps[0].diffs[0].hunksTotal, 2);
 			assert.equal(run.steps[0].diffs[0].bytesOmitted, 0);
 			assert.equal(run.steps[0].diffs[0].partialHunk, false);
 			assert.equal(run.steps[0].diffs[1].path, "valid2.py");
+			assert.equal(run.steps[0].diffs[1].diff, "@@ -1 +1 @@\n-c\n+d\n");
 			assert.equal(run.steps[0].diffs[1].hunksShown, 2);
 			assert.equal(run.steps[0].diffs[1].hunksTotal, 3);
 			assert.equal(run.steps[0].diffs[1].bytesOmitted, 50);
