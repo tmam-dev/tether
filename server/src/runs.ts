@@ -15,6 +15,15 @@ export interface RetrySignal {
 	detail: string;
 }
 
+export interface DiffView {
+	path: string;
+	diff: string;
+	hunksShown: number;
+	hunksTotal: number;
+	bytesOmitted: number;
+	partialHunk: boolean;
+}
+
 export interface StepView {
 	/** This step's own span id, stable across requests -- address a step by this rather than by its index in `steps`. */
 	id: string;
@@ -34,6 +43,8 @@ export interface StepView {
 	cost: number | null;
 	tok: number | null;
 	io: [string, string | unknown][];
+	/** File changes this step reported, already redacted and hunk-truncated by the producer. Absent when the step logged none. */
+	diffs?: DiffView[];
 	sig?: RetrySignal[];
 	sourceType?: "skill" | "sub_agent" | "mcp_server";
 	sourceName?: string;
@@ -177,6 +188,28 @@ export function decodeIoValue(raw: string): string | unknown {
 	}
 }
 
+/** Returns v as a DiffView if it has the exact expected shape, otherwise null -- payloads arrive from unauthenticated ingest, so anything unexpected is ignored rather than trusted or thrown on. */
+function asDiffView(v: unknown): DiffView | null {
+	if (v === null || typeof v !== "object") return null;
+	const d = v as Record<string, unknown>;
+	if (typeof d.path !== "string" || typeof d.diff !== "string") return null;
+	if (typeof d.hunksShown !== "number" || typeof d.hunksTotal !== "number" || typeof d.bytesOmitted !== "number") return null;
+	if (typeof d.partialHunk !== "boolean") return null;
+	return { path: d.path, diff: d.diff, hunksShown: d.hunksShown, hunksTotal: d.hunksTotal, bytesOmitted: d.bytesOmitted, partialHunk: d.partialHunk };
+}
+
+/** Decodes the gen_ai.content.diffs event into DiffViews, or undefined if the step logged none / the payload is unusable. */
+function buildStepDiffs(events: { name: string; attributes: AttrMap }[]): DiffView[] | undefined {
+	for (const e of events) {
+		if (e.name !== "gen_ai.content.diffs" || typeof e.attributes["gen_ai.diffs"] !== "string") continue;
+		const decoded = decodeIoValue(e.attributes["gen_ai.diffs"] as string);
+		if (!Array.isArray(decoded)) return undefined;
+		const views = decoded.map(asDiffView).filter((d): d is DiffView => d !== null);
+		return views.length > 0 ? views : undefined;
+	}
+	return undefined;
+}
+
 function buildStepIo(events: { name: string; attributes: AttrMap }[]): [string, string | unknown][] {
 	const io: [string, string | unknown][] = [];
 	for (const e of events) {
@@ -250,6 +283,7 @@ export function getRun(db: Database.Database, traceId: string): RunView | null {
 		if (tok !== null) totalTokens = (totalTokens ?? 0) + tok;
 		const sourceType = asSourceType(parsed.attrs["gen_ai.harness.source_type"]);
 		const sourceName = asString(parsed.attrs["gen_ai.harness.source_name"]);
+		const diffs = buildStepDiffs(parsed.events);
 
 		steps.push({
 			id: row.spanId,
@@ -262,6 +296,7 @@ export function getRun(db: Database.Database, traceId: string): RunView | null {
 			cost,
 			tok,
 			io: buildStepIo(parsed.events),
+			...(diffs ? { diffs } : {}),
 			...(sourceType && sourceName ? { sourceType, sourceName } : {}),
 		});
 	}

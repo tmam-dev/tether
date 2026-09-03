@@ -381,6 +381,67 @@ describe("getRun", () => {
 			rmSync(join(dbPath, ".."), { recursive: true, force: true });
 		}
 	});
+
+	function diffStepSpan({ traceId, spanId, parentSpanId, name, startNs, endNs, diffs }) {
+		const attrs = { "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": name };
+		const events = diffs === undefined ? [] : [{ name: "gen_ai.content.diffs", attributes: otlpAttrs({ "gen_ai.diffs": JSON.stringify(diffs) }) }];
+		const raw = { traceId, spanId, parentSpanId, name, startTimeUnixNano: startNs, endTimeUnixNano: endNs, attributes: otlpAttrs(attrs), events, status: { code: 1 } };
+		return { traceId, spanId, parentSpanId, name, startTimeUnixNano: startNs, endTimeUnixNano: endNs, raw: JSON.stringify(raw) };
+	}
+
+	test("decodes a step's file diffs into StepView.diffs", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "td", spanId: "rd", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1030000000000" }));
+			insertSpan(db, diffStepSpan({
+				traceId: "td", spanId: "s1", parentSpanId: "rd", name: "edit auth.py",
+				startNs: "1005000000000", endNs: "1010000000000",
+				diffs: [{ path: "auth.py", diff: "@@ -1 +1 @@\n-a\n+b\n", hunksShown: 1, hunksTotal: 3, bytesOmitted: 900, partialHunk: false }],
+			}));
+			const run = getRun(db, "td");
+			assert.equal(run.steps[0].diffs.length, 1);
+			assert.equal(run.steps[0].diffs[0].path, "auth.py");
+			assert.equal(run.steps[0].diffs[0].hunksTotal, 3);
+			assert.equal(run.steps[0].diffs[0].bytesOmitted, 900);
+			assert.equal(run.steps[0].diffs[0].partialHunk, false);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("leaves diffs undefined for a step that logged none, and keeps io untouched", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "td2", spanId: "rd2", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1030000000000" }));
+			insertSpan(db, stepSpan({ traceId: "td2", spanId: "s1", parentSpanId: "rd2", name: "read auth.py", startNs: "1005000000000", endNs: "1010000000000", toolName: "read auth.py" }));
+			const run = getRun(db, "td2");
+			assert.equal(run.steps[0].diffs, undefined);
+			assert.ok(Array.isArray(run.steps[0].io), "io must be unaffected by this change");
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
+	test("ignores a malformed diffs payload rather than throwing", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "td3", spanId: "rd3", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1030000000000" }));
+			insertSpan(db, diffStepSpan({ traceId: "td3", spanId: "s1", parentSpanId: "rd3", name: "edit x", startNs: "1005000000000", endNs: "1010000000000", diffs: { not: "an array" } }));
+			insertSpan(db, diffStepSpan({ traceId: "td3", spanId: "s2", parentSpanId: "rd3", name: "edit y", startNs: "1011000000000", endNs: "1012000000000", diffs: [{ path: 42, diff: null }] }));
+			const run = getRun(db, "td3");
+			assert.equal(run.steps.length, 2, "malformed diffs must not drop the steps");
+			assert.equal(run.steps[0].diffs, undefined);
+			assert.equal(run.steps[1].diffs, undefined);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
 });
 
 describe("malformed nanosecond timestamps never throw (finding 5)", () => {

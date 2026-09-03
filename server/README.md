@@ -120,6 +120,16 @@ prefix (a breaking change would ship as `/api/v2/*`):
   graph is acyclic or that a `parentId` refers to the same run — spans arrive
   from unauthenticated ingest, so a tree built from these must break cycles
   and ignore unknown ids rather than trusting them.
+
+  A step that changed files also carries `diffs`: an array of
+  `{ path, diff, hunksShown, hunksTotal, bytesOmitted, partialHunk }`. The
+  `diff` is unified-diff text, already secret-redacted and truncated at
+  whole-hunk boundaries by the producer. When `hunksShown < hunksTotal` or
+  `bytesOmitted > 0` the diff is incomplete, and `partialHunk` means the last
+  hunk shown is itself cut mid-way — a plugin displaying a diff must surface
+  that rather than presenting it as the whole change. The field is absent for
+  steps that logged no diffs, including every run logged before
+  `trailai-mcp` 0.4.0.
 - `GET /api/v1/harness/:traceId` — that run's harness: skills, sub-agents,
   MCP servers.
 - `GET /api/v1/analytics` — usage aggregated across every run in the store.
