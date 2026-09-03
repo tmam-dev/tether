@@ -83,6 +83,9 @@ export function sanitizeDiffs(entries: DiffInput[]): DiffEntry[] {
 	const out: DiffEntry[] = [];
 
 	for (const entry of entries) {
+		if (typeof entry.path !== "string" || typeof entry.diff !== "string") {
+			continue; // Skip entries with non-string path or diff
+		}
 		const path = redact(entry.path);
 		const { header, hunks, body } = splitHunks(entry.diff);
 		const budget = Math.min(DIFF_ENTRY_BUDGET, remaining);

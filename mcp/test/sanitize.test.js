@@ -44,6 +44,36 @@ describe("sanitize — redaction", () => {
 		const elapsed = Date.now() - start;
 		assert.ok(elapsed < 2000, `redaction took ${elapsed}ms, expected < 2000ms`);
 	});
+
+	test("redacts ordinary secret patterns after regex quantifier bounding", () => {
+		// Verify the {0,64} bound does not break detection of ordinary secrets
+		assert.equal(sanitize("db_password=hunter2hunter2"), "[REDACTED]");
+		assert.equal(sanitize('{"api_key": "abc123def456"}'), '{[REDACTED]}');
+		assert.equal(sanitize("X_SECRET_TOKEN_NAME=abc123"), "[REDACTED]");
+	});
+
+	test("still leaves negative case (password mention with no value) alone after bounding", () => {
+		assert.equal(sanitize("this mentions password but has no value"), "this mentions password but has no value");
+	});
+
+	test("redacts key names near the {0,64} bound", () => {
+		// A key name with 60 characters (within bound) should redact
+		const keyNearBound = "a".repeat(60) + "_password=hunter2hunter2";
+		assert.ok(!sanitize(keyNearBound).includes("password"));
+		assert.ok(sanitize(keyNearBound).includes("[REDACTED]"));
+	});
+
+	test("key names past the {0,64} bound still redact when the keyword aligns", () => {
+		// The {0,64} bound limits the prefix/suffix, but the regex still matches by starting
+		// the match from a position where the keyword is within range. This is the accepted
+		// trade-off: we bound the quantifiers to prevent O(n²) backtracking on malformed input,
+		// and accept that some unusual formatting may fail to redact if the keyword prefix
+		// exceeds 64 characters with no room for suffix matching.
+		const keyWithLongPrefix = "a".repeat(100) + "_password=hunter2hunter2";
+		const redacted = sanitize(keyWithLongPrefix);
+		assert.ok(!redacted.includes("password"), "still redacts when keyword aligns within bound");
+		assert.ok(redacted.includes("[REDACTED]"));
+	});
 });
 
 describe("sanitize — truncation", () => {
@@ -175,5 +205,23 @@ describe("sanitizeDiffs", () => {
 
 	test("returns an empty array for an empty entry list", () => {
 		assert.deepEqual(sanitizeDiffs([]), []);
+	});
+
+	test("skips entries with non-string path or diff, returning only valid entries", () => {
+		const entries = [
+			{ path: "good1.txt", diff: HEADER + HUNK_A },
+			{ path: 123, diff: HEADER + HUNK_A }, // non-string path
+			{ path: "bad2.txt", diff: null }, // non-string diff
+			{ path: "good3.txt", diff: HEADER + HUNK_B }, // valid
+		];
+		const out = sanitizeDiffs(entries);
+		assert.equal(out.length, 2, "should skip 2 bad entries and keep 2 good ones");
+		assert.equal(out[0].path, "good1.txt");
+		assert.equal(out[1].path, "good3.txt");
+	});
+
+	test("handles an entry with non-string path and non-string diff without throwing", () => {
+		const out = sanitizeDiffs([{ path: 123, diff: null }]);
+		assert.equal(out.length, 0, "bad entry should be skipped, not thrown");
 	});
 });
