@@ -10,7 +10,7 @@ import { z } from "zod";
 import { TrailConfig, SpanInput, hexId, nowNanos, sendSpan } from "./otlp.js";
 import { buildHarnessManifest, HarnessManifest } from "./manifest.js";
 import { judgeGoalAttainment, JudgeConfig, Verdict } from "./judge.js";
-import { sanitize } from "./sanitize.js";
+import { sanitize, sanitizeDiffs, DiffInput } from "./sanitize.js";
 
 export interface Run {
 	traceId: string;
@@ -61,6 +61,7 @@ export function buildStepSpan(
 		error_message?: string;
 		source_type?: "skill" | "sub_agent" | "mcp_server";
 		source_name?: string;
+		diffs?: DiffInput[];
 	},
 ): SpanInput {
 	const isError = args.status === "error";
@@ -81,6 +82,9 @@ export function buildStepSpan(
 		events: [
 			...(args.input !== undefined ? [{ name: "gen_ai.content.prompt", attributes: { "gen_ai.prompt": JSON.stringify(sanitize(args.input)) } }] : []),
 			...(args.output !== undefined ? [{ name: "gen_ai.content.completion", attributes: { "gen_ai.completion": JSON.stringify(sanitize(args.output)) } }] : []),
+			...(args.diffs !== undefined && args.diffs.length > 0
+				? [{ name: "gen_ai.content.diffs", attributes: { "gen_ai.diffs": JSON.stringify(sanitizeDiffs(args.diffs)) } }]
+				: []),
 		],
 		...(isError ? { error: { message: args.error_message ?? "step failed" } } : {}),
 	};
@@ -228,9 +232,13 @@ export function buildTrailServer(cfg: TrailConfig, judgeCfg: JudgeConfig | undef
 					.describe("If this step came from a registered skill, sub-agent, or MCP server, which kind"),
 				source_name: z.string().optional()
 					.describe("Name of the skill/sub-agent/MCP server, matching an entry from this run's harness manifest"),
+				diffs: z.array(z.object({
+					path: z.string().describe("File path the change applies to"),
+					diff: z.string().describe("Unified diff of the change"),
+				})).optional().describe("File changes this step made, as unified diffs — large diffs are truncated at whole-hunk boundaries"),
 			},
 		},
-		async ({ run_id, name, kind, input, output, status, error_message, duration_ms, source_type, source_name }) => {
+		async ({ run_id, name, kind, input, output, status, error_message, duration_ms, source_type, source_name, diffs }) => {
 			const run = getRun(run_id);
 			const end = nowNanos();
 			const start = duration_ms
@@ -239,7 +247,7 @@ export function buildTrailServer(cfg: TrailConfig, judgeCfg: JudgeConfig | undef
 			const isError = status === "error";
 			run.steps += 1;
 			if (isError) run.errors += 1;
-			await sendSpan(cfg, buildStepSpan(run, hexId(8), start, end, { name, kind, input, output, status, error_message, source_type, source_name }));
+			await sendSpan(cfg, buildStepSpan(run, hexId(8), start, end, { name, kind, input, output, status, error_message, source_type, source_name, diffs }));
 			return ok(`step logged (${kind}${isError ? ", error" : ""})`);
 		},
 	);
