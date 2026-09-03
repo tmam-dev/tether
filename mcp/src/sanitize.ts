@@ -37,3 +37,105 @@ export function sanitize(value: unknown, maxBytes = 16384): unknown {
 	}
 	return value;
 }
+
+/** 256KB per diff entry, so one enormous file can't crowd out every other file's changes. */
+const DIFF_ENTRY_BUDGET = 262144;
+/** 1MB per step across all entries, so a step touching many files can't emit megabytes into one span. */
+const DIFF_STEP_BUDGET = 1048576;
+
+export interface DiffInput {
+	path: string;
+	diff: string;
+}
+
+export interface DiffEntry {
+	path: string;
+	diff: string;
+	hunksShown: number;
+	hunksTotal: number;
+	bytesOmitted: number;
+	partialHunk: boolean;
+}
+
+/**
+ * Splits a unified diff into its leading file header (the ---/+++ lines) and its @@ hunks.
+ * A string with no @@ at all has no header by definition -- it's unstructured text of unknown
+ * size, so it comes back as `hunks: []` with the whole string as `body` for the caller to
+ * budget-truncate. Treating it as a header would let malformed input bypass the budget.
+ */
+function splitHunks(diff: string): { header: string; hunks: string[]; body: string | null } {
+	const idx = diff.search(/^@@/m);
+	if (idx === -1) return { header: "", hunks: [], body: diff };
+	return {
+		header: diff.slice(0, idx),
+		hunks: diff.slice(idx).split(/^(?=@@)/m).filter((h) => h.length > 0),
+		body: null,
+	};
+}
+
+/**
+ * Redacts and budget-truncates agent-supplied file diffs at whole-hunk boundaries. A diff cut
+ * mid-hunk is unreadable rather than merely partial, so hunks are admitted whole and what was
+ * dropped is reported rather than hidden -- the UI is required to surface it.
+ */
+export function sanitizeDiffs(entries: DiffInput[]): DiffEntry[] {
+	let remaining = DIFF_STEP_BUDGET;
+	const out: DiffEntry[] = [];
+
+	for (const entry of entries) {
+		const path = redact(entry.path);
+		const { header, hunks, body } = splitHunks(entry.diff);
+		const budget = Math.min(DIFF_ENTRY_BUDGET, remaining);
+
+		if (body !== null) {
+			// No hunks: unstructured text. Byte-truncate like any other string.
+			const safe = redact(body);
+			const size = Buffer.byteLength(safe, "utf8");
+			const kept = size <= budget ? safe : truncate(safe, budget);
+			const used = Buffer.byteLength(kept, "utf8");
+			remaining = Math.max(0, remaining - used);
+			out.push({ path, diff: kept, hunksShown: 0, hunksTotal: 0, bytesOmitted: Math.max(0, size - used), partialHunk: false });
+			continue;
+		}
+
+		const safeHeader = redact(header);
+		const kept: string[] = [];
+		let used = 0, shown = 0, omitted = 0, partial = false;
+
+		for (const hunk of hunks) {
+			const safe = redact(hunk);
+			const size = Buffer.byteLength(safe, "utf8");
+			if (used + size <= budget) {
+				kept.push(safe);
+				used += size;
+				shown += 1;
+				continue;
+			}
+			if (shown === 0 && budget > 0) {
+				// One hunk alone exceeds the entry budget -- the only case where a partial hunk
+				// beats showing nothing. Flagged so the UI can say the hunk itself is cut.
+				const cut = truncate(safe, budget);
+				const cutSize = Buffer.byteLength(cut, "utf8");
+				kept.push(cut);
+				used += cutSize;
+				shown += 1;
+				partial = true;
+				omitted += Math.max(0, size - cutSize);
+				continue;
+			}
+			omitted += size;
+		}
+
+		remaining = Math.max(0, remaining - used);
+		out.push({
+			path,
+			diff: safeHeader + kept.join(""),
+			hunksShown: shown,
+			hunksTotal: hunks.length,
+			bytesOmitted: omitted,
+			partialHunk: partial,
+		});
+	}
+
+	return out;
+}
