@@ -110,6 +110,16 @@ prefix (a breaking change would ship as `/api/v2/*`):
   always sent a string. A run logged by a pre-0.3.0 mcp client always has
   string `io` values; a run logged by 0.3.0+ can have any of those types.
   A plugin reading `io` should handle both.
+
+  Each step also carries `id` (its own span id) and `parentId` (the span it
+  reports as its parent). Address a step by `id` rather than by its position
+  in `steps` — the array's order is not part of this contract. Every step
+  currently parents to the run's root span, whose id appears as no step's
+  `id`, so the structure is one level deep in practice; treat a `parentId`
+  that matches no step as "child of the run root". Do not assume the parent
+  graph is acyclic or that a `parentId` refers to the same run — spans arrive
+  from unauthenticated ingest, so a tree built from these must break cycles
+  and ignore unknown ids rather than trusting them.
 - `GET /api/v1/harness/:traceId` — that run's harness: skills, sub-agents,
   MCP servers.
 - `GET /api/v1/analytics` — usage aggregated across every run in the store.

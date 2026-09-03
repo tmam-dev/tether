@@ -16,6 +16,16 @@ export interface RetrySignal {
 }
 
 export interface StepView {
+	/** This step's own span id, stable across requests -- address a step by this rather than by its index in `steps`. */
+	id: string;
+	/**
+	 * The span this step reports as its parent. Today every step parents to the run's root span, so this
+	 * equals no step's `id` and the call structure is one level deep; a producer that threads real parents
+	 * makes it point at another step's `id`. Consumers must treat a `parentId` matching no step in `steps`
+	 * as "child of the run root", and must not assume the graph is acyclic -- both arrive from
+	 * unauthenticated ingest.
+	 */
+	parentId: string | null;
 	type: StepType;
 	title: string;
 	status: "ok" | "err";
@@ -242,6 +252,8 @@ export function getRun(db: Database.Database, traceId: string): RunView | null {
 		const sourceName = asString(parsed.attrs["gen_ai.harness.source_name"]);
 
 		steps.push({
+			id: row.spanId,
+			parentId: row.parentSpanId,
 			type: inferStepType(parsed.attrs),
 			title: asString(parsed.attrs["gen_ai.tool.name"]) ?? row.name,
 			status: parsed.errorCode === 2 ? "err" : "ok",

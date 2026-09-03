@@ -133,6 +133,25 @@ describe("getRun", () => {
 		}
 	});
 
+	test("exposes each step's own span id and its parent span id", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "th", spanId: "rh", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1030000000000" }));
+			insertSpan(db, stepSpan({ traceId: "th", spanId: "s1", parentSpanId: "rh", name: "edit auth.py", startNs: "1005000000000", endNs: "1010000000000", toolName: "str_replace auth.py" }));
+			insertSpan(db, stepSpan({ traceId: "th", spanId: "s2", parentSpanId: "s1", name: "read auth.py", startNs: "1006000000000", endNs: "1007000000000", toolName: "read auth.py" }));
+			const run = getRun(db, "th");
+			assert.equal(run.steps.length, 2);
+			assert.equal(run.steps[0].id, "s1");
+			assert.equal(run.steps[0].parentId, "rh");
+			assert.equal(run.steps[1].id, "s2");
+			assert.equal(run.steps[1].parentId, "s1");
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
+
 	test("infers step type: chat -> llm, tool-name keyword match, task-with-no-tool-name -> reason", () => {
 		const dbPath = makeTempDbPath();
 		const db = openDatabase(dbPath);
