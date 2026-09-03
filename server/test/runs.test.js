@@ -442,6 +442,38 @@ describe("getRun", () => {
 			rmSync(join(dbPath, ".."), { recursive: true, force: true });
 		}
 	});
+
+	test("keeps valid diffs and drops invalid ones from a mixed-validity array", () => {
+		const dbPath = makeTempDbPath();
+		const db = openDatabase(dbPath);
+		try {
+			insertSpan(db, rootSpan({ traceId: "td4", spanId: "rd4", goal: "g", agent: "a", startNs: "1000000000000", endNs: "1030000000000" }));
+			insertSpan(db, diffStepSpan({
+				traceId: "td4", spanId: "s1", parentSpanId: "rd4", name: "edit mixed",
+				startNs: "1005000000000", endNs: "1010000000000",
+				diffs: [
+					{ path: "valid1.py", diff: "@@ -1 +1 @@\n-a\n+b\n", hunksShown: 1, hunksTotal: 2, bytesOmitted: 0, partialHunk: false },
+					{ path: "invalid.py", diff: "@@ -1 +1 @@\n-x\n+y\n", hunksShown: 1, hunksTotal: "not-a-number", bytesOmitted: 0, partialHunk: false },
+					{ path: "valid2.py", diff: "@@ -1 +1 @@\n-c\n+d\n", hunksShown: 2, hunksTotal: 3, bytesOmitted: 50, partialHunk: true },
+				],
+			}));
+			const run = getRun(db, "td4");
+			assert.equal(run.steps[0].diffs.length, 2, "invalid entry is dropped, valid ones survive");
+			assert.equal(run.steps[0].diffs[0].path, "valid1.py");
+			assert.equal(run.steps[0].diffs[0].hunksShown, 1);
+			assert.equal(run.steps[0].diffs[0].hunksTotal, 2);
+			assert.equal(run.steps[0].diffs[0].bytesOmitted, 0);
+			assert.equal(run.steps[0].diffs[0].partialHunk, false);
+			assert.equal(run.steps[0].diffs[1].path, "valid2.py");
+			assert.equal(run.steps[0].diffs[1].hunksShown, 2);
+			assert.equal(run.steps[0].diffs[1].hunksTotal, 3);
+			assert.equal(run.steps[0].diffs[1].bytesOmitted, 50);
+			assert.equal(run.steps[0].diffs[1].partialHunk, true);
+		} finally {
+			db.close();
+			rmSync(join(dbPath, ".."), { recursive: true, force: true });
+		}
+	});
 });
 
 describe("malformed nanosecond timestamps never throw (finding 5)", () => {
