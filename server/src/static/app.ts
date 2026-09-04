@@ -75,6 +75,51 @@ function renderIoPair(p: [string, string | unknown]): string {
 	return '<div class="io-kind">' + escapeHtml(label) + "</div>" + body;
 }
 
+function fmtBytes(n: number): string {
+	return n >= 1024 ? (n / 1024).toFixed(n >= 10240 ? 0 : 1).replace(/\.0$/, "") + "KB" : n + "B";
+}
+
+/**
+ * Renders agent-reported file diffs. Truncation is stated explicitly rather than implied: a diff
+ * that looks complete but isn't will send a developer down the wrong path, so every omission gets
+ * a banner and a mid-hunk cut says so in its own words.
+ */
+function renderDiffs(diffs: { path: string; diff: string; hunksShown: number; hunksTotal: number; bytesOmitted: number; partialHunk: boolean }[]): string {
+	return diffs.map((d) => {
+		const lines = d.diff.split("\n").map((ln) => {
+			const cls = ln.startsWith("+") && !ln.startsWith("+++") ? "diff-add"
+				: ln.startsWith("-") && !ln.startsWith("---") ? "diff-del"
+				: ln.startsWith("@@") ? "diff-hunk"
+				: "diff-ctx";
+			return '<div class="' + cls + '">' + escapeHtml(ln) + "</div>";
+		}).join("");
+
+		const incomplete = d.hunksShown < d.hunksTotal || d.bytesOmitted > 0 || d.partialHunk;
+		let banner = "";
+		if (d.hunksTotal > 0 && d.hunksShown === 0) {
+			banner = "Changed, but not shown — " + d.hunksTotal + " hunks omitted (" + fmtBytes(d.bytesOmitted) + ") to stay within this step's diff budget.";
+		} else if (d.hunksTotal === 0 && d.bytesOmitted > 0) {
+			// This diff never had hunks to begin with (unstructured/non-unified text) -- talking
+			// about "0 of 0 hunks shown" here would be accurate but nonsensical, so state the
+			// truncation on its own terms instead.
+			banner = "Truncated — " + fmtBytes(d.bytesOmitted) + " omitted to stay within this step's diff budget.";
+		} else if (incomplete) {
+			// hunksShown/hunksTotal/bytesOmitted can all agree nothing was dropped while partialHunk is
+			// still true (the last hunk itself was cut mid-way) -- state that on its own rather than
+			// tacking "0 omitted" onto a sentence that would otherwise read as self-contradictory.
+			const countsIncomplete = d.hunksShown < d.hunksTotal || d.bytesOmitted > 0;
+			banner = countsIncomplete
+				? d.hunksShown + " of " + d.hunksTotal + " hunks shown, " + fmtBytes(d.bytesOmitted) + " omitted."
+					+ (d.partialHunk ? " The last hunk shown is itself cut mid-way." : "")
+				: "The last hunk shown is cut mid-way — this diff is not complete.";
+		}
+
+		return '<div class="io-kind">' + escapeHtml(d.path) + "</div>"
+			+ (banner ? '<div class="diff-banner">' + escapeHtml(banner) + "</div>" : "")
+			+ '<div class="io-diff">' + lines + "</div>";
+	}).join("");
+}
+
 // Object.assign(Object.create(null), ...) rather than a plain object literal: `runData.verdict`
 // is attacker-controlled (arrives via the unauthenticated POST /traces endpoint, serialized
 // straight through into the run-data JSON island). runs.ts's asVerdict() is the primary guard
@@ -264,8 +309,9 @@ function mountDetailPanel(runData: RunData): () => void {
 		const insp = $("insp");
 		let inner = '<div class="pin-note"><span>&#9670; pinned to step ' + (i + 1) + '</span><button id="unpin">back to verdict</button></div>';
 		if (s.sig) inner += s.sig.map((sg) => '<div class="io-sig"><span style="color:var(--stuck);display:grid;place-items:center">' + svg(SVG_LOOP, 1.9) + '</span><div><span class="st" style="color:var(--stuck)">Retry loop &times;' + sg.count + '</span><div style="color:var(--ink-2);margin-top:2px">' + escapeHtml(sg.detail) + "</div></div></div>").join("");
+		if (s.diffs && s.diffs.length) inner += renderDiffs(s.diffs);
 		if (s.io && s.io.length) inner += s.io.map((p) => renderIoPair(p)).join("");
-		else inner += '<div class="insp-empty">No input/output recorded for this step.</div>';
+		else if (!s.diffs || !s.diffs.length) inner += '<div class="insp-empty">No input/output recorded for this step.</div>';
 		insp.innerHTML = inner;
 		const un = document.getElementById("unpin");
 		if (un) un.addEventListener("click", () => pinStep(null));

@@ -145,3 +145,37 @@ describe("buildExceptionSpan", () => {
 		assert.deepEqual(span.events, []);
 	});
 });
+
+describe("buildStepSpan — diffs", () => {
+	const base = { name: "edit auth.py", kind: "tool", status: "ok" };
+
+	test("emits a gen_ai.content.diffs event carrying sanitized entries", () => {
+		const span = buildStepSpan(RUN, "s1", "1000", "2000", {
+			...base,
+			diffs: [{ path: "auth.py", diff: "--- a/auth.py\n+++ b/auth.py\n@@ -1 +1 @@\n-a\n+b\n" }],
+		});
+		const ev = span.events.find((e) => e.name === "gen_ai.content.diffs");
+		assert.ok(ev, "diffs event must be present");
+		const parsed = JSON.parse(ev.attributes["gen_ai.diffs"]);
+		assert.equal(parsed.length, 1);
+		assert.equal(parsed[0].path, "auth.py");
+		assert.equal(parsed[0].hunksTotal, 1);
+		assert.equal(parsed[0].hunksShown, 1);
+	});
+
+	test("omits the event entirely when diffs is absent", () => {
+		const span = buildStepSpan(RUN, "s1", "1000", "2000", base);
+		assert.equal(span.events.find((e) => e.name === "gen_ai.content.diffs"), undefined);
+	});
+
+	test("omits the event when diffs is an empty array", () => {
+		const span = buildStepSpan(RUN, "s1", "1000", "2000", { ...base, diffs: [] });
+		assert.equal(span.events.find((e) => e.name === "gen_ai.content.diffs"), undefined);
+	});
+
+	test("a span with no diffs is unchanged from a span built without the field", () => {
+		const withField = buildStepSpan(RUN, "s1", "1000", "2000", { ...base, diffs: undefined });
+		const without = buildStepSpan(RUN, "s1", "1000", "2000", base);
+		assert.deepEqual(withField, without);
+	});
+});

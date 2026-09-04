@@ -885,3 +885,55 @@ describe("renderIoPair / JSON tree rendering", () => {
 		assert.equal(sandbox.isMessageList([]), false);
 	});
 });
+
+describe("renderDiffs", () => {
+	const render = (entries) => loadApp().sandbox.renderDiffs(entries);
+
+	test("renders the file path and +/- lines", () => {
+		const html = render([{ path: "auth.py", diff: "@@ -1 +1 @@\n-old\n+new\n", hunksShown: 1, hunksTotal: 1, bytesOmitted: 0, partialHunk: false }]);
+		assert.ok(html.includes("auth.py"));
+		assert.ok(html.includes("diff-add"), "added lines need their own class");
+		assert.ok(html.includes("diff-del"), "removed lines need their own class");
+	});
+
+	test("shows a truncation banner naming hunks shown and bytes omitted", () => {
+		const html = render([{ path: "big.py", diff: "@@ -1 +1 @@\n+x\n", hunksShown: 3, hunksTotal: 11, bytesOmitted: 48128, partialHunk: false }]);
+		assert.ok(html.includes("3 of 11 hunks"));
+		assert.ok(/47(\.\d+)?\s?KB|48128/.test(html), "omitted size must be stated");
+	});
+
+	test("says so when the last shown hunk is itself cut", () => {
+		const html = render([{ path: "huge.py", diff: "@@ -1 +1 @@\n+y\n", hunksShown: 1, hunksTotal: 1, bytesOmitted: 90000, partialHunk: true }]);
+		assert.ok(/cut|truncated/i.test(html), "a mid-hunk cut must be stated, not implied");
+	});
+
+	test("still shows a banner when partialHunk is true but hunksShown/hunksTotal/bytesOmitted all claim nothing was dropped", () => {
+		const html = render([{ path: "sneaky.py", diff: "@@ -1 +1 @@\n+z\n", hunksShown: 1, hunksTotal: 1, bytesOmitted: 0, partialHunk: true }]);
+		assert.ok(html.includes('class="diff-banner"'), "a mid-hunk cut must render a banner even when the counts alone look complete");
+		assert.ok(/cut|truncated/i.test(html), "the banner must communicate the cut, not just imply it via omitted counts");
+	});
+
+	test("renders a header-only entry squeezed out by the step budget as changed-but-not-shown", () => {
+		const html = render([{ path: "skipped.py", diff: "--- a/skipped.py\n+++ b/skipped.py\n", hunksShown: 0, hunksTotal: 4, bytesOmitted: 30000, partialHunk: false }]);
+		assert.ok(html.includes("skipped.py"), "a changed file must stay visible");
+		assert.ok(/not shown|0 of 4/i.test(html));
+	});
+
+	test("renders text that is not a unified diff as plain lines instead of dropping it", () => {
+		const html = render([{ path: "weird.txt", diff: "this is not a diff at all", hunksShown: 0, hunksTotal: 0, bytesOmitted: 0, partialHunk: false }]);
+		assert.ok(html.includes("this is not a diff at all"), "unparseable content must still be shown");
+		assert.ok(html.includes("weird.txt"));
+	});
+
+	test("escapes HTML in diff content", () => {
+		const html = render([{ path: "x.html", diff: "@@ -1 +1 @@\n+<script>alert(1)</script>\n", hunksShown: 1, hunksTotal: 1, bytesOmitted: 0, partialHunk: false }]);
+		assert.ok(!html.includes("<script>alert(1)</script>"), "diff text is attacker-controlled and must be escaped");
+	});
+
+	test("a budget-truncated non-unified diff gets its own wording instead of '0 of 0 hunks shown'", () => {
+		const html = render([{ path: "blob.txt", diff: "not a diff at all, just truncated text", hunksShown: 0, hunksTotal: 0, bytesOmitted: 4096, partialHunk: false }]);
+		assert.ok(!html.includes("0 of 0 hunks"), "hunk-counting language is nonsensical when there were never any hunks");
+		assert.ok(/truncated/i.test(html), "the banner must still say content was cut");
+		assert.ok(html.includes("4KB") || html.includes("4096"), "the omitted size must still be stated");
+	});
+});

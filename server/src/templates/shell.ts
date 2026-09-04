@@ -219,6 +219,13 @@ const STYLE = `
 	.io-sig svg { width: 17px; height: 17px; flex: none; margin-top: 1px; }
 	.io-sig .st { font-weight: 600; }
 	.io-json { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; font-family: var(--mono); font-size: 12px; line-height: 1.6; overflow-x: auto; }
+	.io-diff { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.5; border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; margin: 4px 0 10px; }
+	.io-diff > div { padding: 0 8px; white-space: pre; }
+	.diff-add { background: var(--met-wash); color: var(--met); }
+	.diff-del { background: var(--failed-wash); color: var(--failed); }
+	.diff-hunk { background: var(--panel-2); color: var(--ink-3); }
+	.diff-ctx { color: var(--ink-2); }
+	.diff-banner { font-size: 11px; color: var(--partial); background: var(--partial-wash); border-radius: 5px; padding: 4px 8px; margin: 4px 0; }
 	.jv-node > summary { cursor: pointer; color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 	.jv-children { margin: 4px 0 0 14px; border-left: 1px solid var(--line); padding-left: 10px; }
 	.jv-row { margin: 2px 0; }

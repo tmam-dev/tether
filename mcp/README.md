@@ -100,6 +100,23 @@ Add an instruction to your agent's project rules (e.g. `CLAUDE.md` /
 > `trail_log_llm_call`, and failures with `trail_log_exception`. When the task
 > completes, call `trail_finish_run` with a one-line summary.
 
+## What's new in 0.4.0
+
+`trail_log_step` accepts an optional `diffs` array — `{ path, diff }` entries
+holding unified-diff text for files the step changed. Purely additive: a
+caller that passes no `diffs` behaves exactly as it did in 0.3.0, and no
+upgrade step is required.
+
+Diffs are redacted and truncated **before** they leave the process, the same
+as every other structured payload. Large diffs are cut at whole-hunk
+boundaries — hunk bytes are capped at 256KB per file and 1MB per step, with
+each file's header always kept in full outside that cap so a changed file is
+never silently dropped — so a truncated diff stays readable instead of ending
+mid-hunk, and what was dropped is reported alongside it so the UI can say so.
+
+Diffs are agent-reported. Tether records what the harness passes; it does not
+read the filesystem to verify a diff against what actually changed on disk.
+
 ## Migrating from 0.2.x to 0.3.0
 
 The `input`/`output`/`prompt`/`completion`/`stack`/`context` fields on
