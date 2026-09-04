@@ -109,9 +109,10 @@ upgrade step is required.
 
 Diffs are redacted and truncated **before** they leave the process, the same
 as every other structured payload. Large diffs are cut at whole-hunk
-boundaries (256KB per file, 1MB per step) so a truncated diff stays readable
-instead of ending mid-hunk, and what was dropped is reported alongside it so
-the UI can say so.
+boundaries — hunk bytes are capped at 256KB per file and 1MB per step, with
+each file's header always kept in full outside that cap so a changed file is
+never silently dropped — so a truncated diff stays readable instead of ending
+mid-hunk, and what was dropped is reported alongside it so the UI can say so.
 
 Diffs are agent-reported. Tether records what the harness passes; it does not
 read the filesystem to verify a diff against what actually changed on disk.
